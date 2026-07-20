@@ -73,10 +73,17 @@ embedded in it; the street/unit text is never matched against anything. Delibera
 scope boundary, not an oversight.
 
 `GET /v1/locations/reverse?lat=&lng=&limit=` — KNN via `ORDER BY location <-> point`,
-same GiST index as radius search will use. `distance_meters` is computed alongside and
-only present on this endpoint's rows (`LocationDto` keeps it optional) — search has no
+same GiST index radius search also uses. `distance_meters` is computed alongside and
+only present on reverse/radius rows (`LocationDto` keeps it optional) — search has no
 notion of distance. Verified the exact Kysely-generated SQL still uses
 `zip_codes_location_gist_idx` (`Index Scan`, not a seq scan).
+
+`GET /v1/locations/radius?lat=&lng=&radius_km=&limit=` — `ST_DWithin` for the bounding
+filter, `ST_Distance` for both the returned `distance_meters` and the ordering. Verified
+the exact query still uses `zip_codes_location_gist_idx` (`Bitmap Index Scan`, same
+plan shape as the manual verification done before either endpoint was built). Zero
+matches inside the radius return `200` with `data: []`, not `404` — consistent with
+search and reverse.
 
 ### Bugs found by testing, not by reading the code
 
@@ -131,7 +138,6 @@ layer, by design.
   relevant result elsewhere, and a short query can rank a long prefix match below an
   unrelated short name. A weighted/boosted ranking would fix both; out of scope here.
 - Full US state names aren't recognized in `"City, State"` input, only 2-letter codes.
-- Radius search isn't built yet (forward search and reverse lookup both exist).
 - Connection pool size is hardcoded, not env-configurable.
 - **Reverse lookup finds the nearest ZIP _centroid_, not the ZIP whose real (irregular)
   boundary actually contains the point.** The dataset has no boundary polygons, only
@@ -148,7 +154,6 @@ layer, by design.
 
 ## Next Steps
 
-- Radius search (same patterns as reverse lookup: real-data tests, `EXPLAIN ANALYZE`-verified index).
 - Automated idempotency test for ingestion (today it's verified by hand).
 - State-name-to-code mapping for forward search.
 - Prefix-aware ranking so short queries don't bury long, relevant matches.

@@ -223,3 +223,86 @@ describe("GET /v1/locations/reverse", () => {
         expect(response.status).toBe(400);
     });
 });
+
+describe("GET /v1/locations/radius", () => {
+    it("returns only the exact match within a tiny radius", async () => {
+        const response = await api.get(
+            `${V1}/locations/radius?lat=34.0901&lng=-118.4065&radius_km=0.1`
+        );
+
+        expect(response.status).toBe(200);
+        expect(response.body.data).toHaveLength(1);
+        expect(response.body.data[0]).toMatchObject({ zip_code: "90210", distance_meters: 0 });
+    });
+
+    it("returns all locations within a larger radius, ordered by ascending distance", async () => {
+        const response = await api.get(
+            `${V1}/locations/radius?lat=34.0901&lng=-118.4065&radius_km=5&limit=50`
+        );
+
+        expect(response.status).toBe(200);
+        expect(response.body.data).toHaveLength(12);
+        for (const row of response.body.data) {
+            expect(row.distance_meters).toBeLessThanOrEqual(5000);
+        }
+        const distances = response.body.data.map(
+            (row: { distance_meters: number }) => row.distance_meters
+        );
+        expect(distances).toEqual([...distances].sort((a, b) => a - b));
+    });
+
+    it("respects limit even when more locations exist within the radius", async () => {
+        const response = await api.get(
+            `${V1}/locations/radius?lat=34.0901&lng=-118.4065&radius_km=5&limit=3`
+        );
+
+        expect(response.status).toBe(200);
+        expect(response.body.data).toHaveLength(3);
+    });
+
+    it("returns 200 with an empty array when nothing is within the radius", async () => {
+        const response = await api.get(`${V1}/locations/radius?lat=0&lng=0&radius_km=1`);
+
+        expect(response.status).toBe(200);
+        expect(response.body.data).toEqual([]);
+    });
+
+    it("returns 400 when radius_km is missing", async () => {
+        const response = await api.get(`${V1}/locations/radius?lat=34.0901&lng=-118.4065`);
+
+        expect(response.status).toBe(400);
+        expect(response.body.details).toEqual(
+            expect.arrayContaining([expect.objectContaining({ field: "radius_km" })])
+        );
+    });
+
+    it("returns 400 when radius_km is zero or negative", async () => {
+        const zero = await api.get(`${V1}/locations/radius?lat=0&lng=0&radius_km=0`);
+        const negative = await api.get(`${V1}/locations/radius?lat=0&lng=0&radius_km=-5`);
+
+        expect(zero.status).toBe(400);
+        expect(negative.status).toBe(400);
+    });
+
+    it("returns 400 when radius_km exceeds the cap of 500", async () => {
+        const response = await api.get(`${V1}/locations/radius?lat=0&lng=0&radius_km=501`);
+
+        expect(response.status).toBe(400);
+    });
+
+    it("returns 400 when lat or lng is out of range", async () => {
+        const badLat = await api.get(`${V1}/locations/radius?lat=999&lng=0&radius_km=10`);
+        const badLng = await api.get(`${V1}/locations/radius?lat=0&lng=-999&radius_km=10`);
+
+        expect(badLat.status).toBe(400);
+        expect(badLng.status).toBe(400);
+    });
+
+    it("returns 400 when limit exceeds the max of 200", async () => {
+        const response = await api.get(
+            `${V1}/locations/radius?lat=34.0901&lng=-118.4065&radius_km=10&limit=201`
+        );
+
+        expect(response.status).toBe(400);
+    });
+});

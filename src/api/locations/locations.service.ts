@@ -1,5 +1,10 @@
 import * as locationsRepository from "./locations.repository.js";
-import type { LocationDto, ReverseQueryInput, SearchQueryInput } from "./locations.types.js";
+import type {
+    LocationDto,
+    RadiusQueryInput,
+    ReverseQueryInput,
+    SearchQueryInput,
+} from "./locations.types.js";
 
 const ZIP_ONLY_PATTERN = /^\d{1,5}$/;
 const ZIP_ANYWHERE_PATTERN = /\b\d{5}\b/;
@@ -36,4 +41,13 @@ export async function getNearestLocations({
     limit,
 }: ReverseQueryInput): Promise<LocationDto[]> {
     return locationsRepository.findNearest(lat, lng, limit);
+}
+
+export async function getLocationsWithinRadius({
+    lat,
+    lng,
+    radius_km,
+    limit,
+}: RadiusQueryInput): Promise<LocationDto[]> {
+    return locationsRepository.findWithinRadius(lat, lng, radius_km, limit);
 }

@@ -1,7 +1,11 @@
 import type { Request, Response } from "express";
-import { getNearestLocations, searchLocations } from "./locations.service.js";
+import {
+    getLocationsWithinRadius,
+    getNearestLocations,
+    searchLocations,
+} from "./locations.service.js";
 import { sendResponse } from "../../utils/response.js";
-import type { ReverseQueryInput, SearchQueryInput } from "./locations.types.js";
+import type { RadiusQueryInput, ReverseQueryInput, SearchQueryInput } from "./locations.types.js";
 
 type RequestWithValidatedQuery<T> = Request & { validatedQuery: T };
 
@@ -18,5 +22,13 @@ export async function reverseLocationsHandler(
     res: Response
 ) {
     const results = await getNearestLocations(req.validatedQuery);
+    sendResponse(res, 200, results);
+}
+
+export async function radiusLocationsHandler(
+    req: RequestWithValidatedQuery<RadiusQueryInput>,
+    res: Response
+) {
+    const results = await getLocationsWithinRadius(req.validatedQuery);
     sendResponse(res, 200, results);
 }

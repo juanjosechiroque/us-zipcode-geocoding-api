@@ -3,8 +3,16 @@ import rateLimit from "express-rate-limit";
 import { asyncHandler } from "../../utils/asyncHandler.js";
 import { validateQuery } from "../../middleware/validationMiddleware.js";
 import { NODE_ENV, SEARCH_RATE_LIMIT_MAX, SEARCH_RATE_LIMIT_WINDOW_SECONDS } from "../../config.js";
-import { reverseQuerySchema, searchQuerySchema } from "./locations.validation.js";
-import { reverseLocationsHandler, searchLocationsHandler } from "./locations.controller.js";
+import {
+    radiusQuerySchema,
+    reverseQuerySchema,
+    searchQuerySchema,
+} from "./locations.validation.js";
+import {
+    radiusLocationsHandler,
+    reverseLocationsHandler,
+    searchLocationsHandler,
+} from "./locations.controller.js";
 
 const router = Router();
 
@@ -26,5 +34,7 @@ router.get(
 );
 
 router.get("/reverse", validateQuery(reverseQuerySchema), asyncHandler(reverseLocationsHandler));
+
+router.get("/radius", validateQuery(radiusQuerySchema), asyncHandler(radiusLocationsHandler));
 
 export default router;

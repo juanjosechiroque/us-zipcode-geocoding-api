@@ -27,6 +27,24 @@ export async function findNearest(lat: number, lng: number, limit: number): Prom
         .execute();
 }
 
+export async function findWithinRadius(
+    lat: number,
+    lng: number,
+    radiusKm: number,
+    limit: number
+): Promise<LocationDto[]> {
+    const point = geographyPoint(lat, lng);
+    const radiusMeters = radiusKm * 1000;
+    return db
+        .selectFrom("zip_codes")
+        .select(SELECT_COLUMNS)
+        .select(sql<number>`ST_Distance(location, ${point})`.as("distance_meters"))
+        .where(sql<boolean>`ST_DWithin(location, ${point}, ${radiusMeters})`)
+        .orderBy(sql`ST_Distance(location, ${point})`, "asc")
+        .limit(limit)
+        .execute();
+}
+
 export async function findByZipPrefix(prefix: string, limit: number): Promise<LocationDto[]> {
     return db
         .selectFrom("zip_codes")
