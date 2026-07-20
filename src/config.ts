@@ -9,6 +9,7 @@ const envSchema = z
     .object({
         NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
         PORT: z.coerce.number().int().positive().default(3000),
+        DATABASE_URL: z.string().trim().min(1, "DATABASE_URL is required"),
         CORS_ALLOWED_ORIGINS: z.string().trim().optional(),
         RATE_LIMIT_WINDOW_MINUTES: z.coerce.number().int().positive().optional(),
         RATE_LIMIT_MAX: z.coerce.number().int().positive().optional(),
@@ -35,6 +36,7 @@ if (!parsedEnv.success) {
 export const {
     NODE_ENV,
     PORT,
+    DATABASE_URL,
     CORS_ALLOWED_ORIGINS,
     RATE_LIMIT_WINDOW_MINUTES,
     RATE_LIMIT_MAX,

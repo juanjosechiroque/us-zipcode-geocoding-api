@@ -1,7 +1,6 @@
 export type AppError = Error & {
     code: string;
     statusCode: number;
-    details?: Array<Record<string, unknown>>;
 };
 
 function createAppError(message: string, code: string, statusCode: number): AppError {

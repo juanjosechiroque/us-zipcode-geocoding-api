@@ -11,6 +11,7 @@
         "validate": "eslint . && prettier --check .",
         "format": "prettier --write . && eslint . --fix",
         "prepare": "husky || true",
+        "db:migrate": "tsx scripts/migrate.ts",
         "test": "vitest run",
         "test:coverage": "vitest run --coverage",
         "typecheck": "tsc --project tsconfig.check.json"
@@ -33,6 +34,8 @@
         "express": "^5.0.1",
         "express-rate-limit": "^7.4.1",
         "helmet": "^8.0.0",
+        "kysely": "^0.28.2",
+        "pg": "^8.13.1",
         "pino": "^9.6.0",
         "pino-http": "^10.4.0",
         "zod": "^3.24.1"
@@ -42,6 +45,7 @@
         "@types/cors": "^2.8.19",
         "@types/express": "^5.0.6",
         "@types/node": "^22.10.5",
+        "@types/pg": "^8.11.10",
         "@types/supertest": "^6.0.2",
         "@vitest/coverage-v8": "^2.1.8",
         "dotenv": "^16.4.7",

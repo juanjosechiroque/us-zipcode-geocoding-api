@@ -36,11 +36,13 @@ proven to work, instead of re-deriving the same guarantees in an unfamiliar fram
 
 ### Error handling: typed error factories + one centralized handler
 
-`BadRequestError` / `NotFoundError` (in `src/errors.ts`) are plain factories that
-attach `statusCode`/`code` to a real `Error`, not a class hierarchy — enough to
-distinguish 400 vs 404 vs 500 without ceremony. Rejected alternative: per-route
-try/catch with inline `res.status().json()` calls, which is exactly what tends to
-drift out of sync across a codebase and produce inconsistent error shapes.
+`NotFoundError` (in `src/errors.ts`) is a plain factory that attaches
+`statusCode`/`code` to a real `Error`, not a class hierarchy — enough to distinguish
+404 vs 500 without ceremony. `BadRequestError` will be added back in Stage 4 alongside
+the query-validation middleware that actually throws it — kept out until then so
+nothing in the repo sits unused. Rejected alternative: per-route try/catch with inline
+`res.status().json()` calls, which is exactly what tends to drift out of sync across a
+codebase and produce inconsistent error shapes.
 
 ### Response envelope: `{ status, message, data }` on success, `{ status, code, message, details? }` on error
 
@@ -50,7 +52,44 @@ response has no error category to report.
 
 ## Data Model
 
-_Added in Stage 2._
+### One denormalized `zip_codes` table (not a normalized `zip → city → state` schema)
+
+The prompt frames the dataset as "relational in nature" and hints the obvious answer
+isn't the right one. Verified against the real data (GeoNames `US.zip`, 41,489 rows):
+only 2 ZIP codes have more than one row. A ZIP code is, for practical purposes, a flat
+entity — city/state/county attributes don't repeat across rows in any way that would
+benefit from normalization. Splitting this into `zip_codes → cities → states` tables
+would add a join to every read (forward search, reverse lookup, radius search are _all_
+reads) for zero real data-integrity benefit. One table, one write path (the ingestion
+script), read-optimized.
+
+### Database: PostgreSQL + PostGIS (not MongoDB, not Elasticsearch)
+
+MongoDB is what the reference starter used, but this domain needs two things Mongo
+doesn't cover as one piece. First, geodesic radius/nearest-neighbor queries: `geography`
+plus GiST (`ST_DWithin`, `<->` for KNN) are purpose-built for this, and Mongo's
+`2dsphere` plus `$geoNear` can do it too. Second, fuzzy/prefix autocomplete on city
+names needs `pg_trgm`, which has no equivalent in Mongo without bolting on a second
+search engine such as Elasticsearch. Elasticsearch was rejected for the same reason: it
+would solve autocomplete well, but introduces a second datastore to keep in sync for a
+dataset this size, which is the "overbuilt" failure mode the assessment explicitly
+warns against. One SQL engine, two purpose-built index types (GiST + GIN/pg_trgm), no
+second store.
+
+### Query layer: Kysely, not an ORM
+
+Prisma's PostGIS support is thin (no native `geography`/`geometry` column type, raw SQL
+escape hatches needed for anything spatial). Kysely gives typed query building for the
+90% of normal SQL while leaving raw `sql` template fragments as a first-class citizen
+for `ST_DWithin`/`ST_MakePoint`/KNN — no fighting the abstraction for the exact queries
+this API is built around.
+
+### The `location` column is derived, not written directly
+
+`location GEOGRAPHY(Point,4326) GENERATED ALWAYS AS (...) STORED` computes itself from
+`latitude`/`longitude` on every insert/update. The ingestion script (Stage 3) only ever
+writes lat/lng — it can't drift out of sync with the derived geography value, and there
+is no second code path that has to remember to keep both in sync.
 
 ## API Design
 

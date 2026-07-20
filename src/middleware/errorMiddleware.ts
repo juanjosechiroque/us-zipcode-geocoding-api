@@ -7,7 +7,6 @@ type ResolvedError = {
     statusCode: number;
     code: string;
     message: string;
-    details?: AppError["details"] | undefined;
 };
 
 function resolveError(err: unknown): ResolvedError {
@@ -22,7 +21,6 @@ function resolveError(err: unknown): ResolvedError {
             statusCode: errorLike.statusCode,
             code: errorLike.code ?? "Error",
             message: errorLike.message ?? "Unexpected error",
-            details: errorLike.details,
         };
     }
 
@@ -47,20 +45,9 @@ export const errorGenericHandler: ErrorRequestHandler = (err, req, res, _next) =
         }
     }
 
-    const result: {
-        status: number;
-        code: string;
-        message: string;
-        details?: AppError["details"] | undefined;
-    } = {
+    res.status(resolved.statusCode).json({
         status: resolved.statusCode,
         code: resolved.code,
         message: resolved.message,
-    };
-
-    if (resolved.details != null && Array.isArray(resolved.details)) {
-        result.details = resolved.details;
-    }
-
-    res.status(resolved.statusCode).json(result);
+    });
 };

@@ -1,5 +1,6 @@
 import app from "./src/app.js";
 import { PORT } from "./src/config.js";
+import { disconnectDB } from "./src/database.js";
 import logger from "./src/utils/logger.js";
 
 const server = app.listen(PORT, () => {
@@ -13,11 +14,13 @@ server.on("error", (err: Error) => {
 
 function shutdown(signal: NodeJS.Signals) {
     logger.info({ signal }, "Shutdown initiated");
-    server.close((closeErr) => {
+    server.close(async (closeErr) => {
         if (closeErr) {
             logger.error({ err: closeErr }, "Error during shutdown");
             process.exit(1);
+            return;
         }
+        await disconnectDB();
         process.exit(0);
     });
 }

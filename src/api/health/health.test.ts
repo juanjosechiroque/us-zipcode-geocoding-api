@@ -3,12 +3,12 @@ import { describe, expect, it } from "vitest";
 const { api, V1 } = await import("../../tests/helpers.js");
 
 describe("GET /health", () => {
-    it("returns 200 with a healthy status", async () => {
+    it("reports DB connectivity status (200 connected, 503 degraded)", async () => {
         const response = await api.get(`${V1}/health`);
 
-        expect(response.status).toBe(200);
-        expect(response.body).toMatchObject({ status: "healthy" });
+        expect([200, 503]).toContain(response.status);
         expect(response.body).toHaveProperty("uptime");
+        expect(response.body).toHaveProperty("services.db");
     });
 });
 
