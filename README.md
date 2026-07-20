@@ -1,7 +1,7 @@
 # zipcodes-api
 
-A geocoding API over US ZIP code data. Forward search works today; reverse lookup and
-radius search are next (see [Known Limitations](#known-limitations)). Express +
+A geocoding API over US ZIP code data. Forward search and reverse lookup work today;
+radius search is next (see [Known Limitations](#known-limitations)). Express +
 TypeScript + PostgreSQL/PostGIS.
 
 Requirements and locked decisions: [SPEC.md](SPEC.md). This README stays thin on
@@ -53,6 +53,9 @@ curl "localhost:3000/v1/locations/search?q=902&limit=5"
 curl "localhost:3000/v1/locations/search?q=Beverly"               # city, fuzzy
 curl "localhost:3000/v1/locations/search?q=Springfield,IL"        # city scoped by state
 curl "localhost:3000/v1/locations/search?q=123+Main+St,+Beverly+Hills,+CA+90210"  # full address, resolves via the ZIP
+
+curl "localhost:3000/v1/locations/reverse?lat=34.0901&lng=-118.4065"              # nearest location
+curl "localhost:3000/v1/locations/reverse?lat=34.0901&lng=-118.4065&limit=5"      # 5 nearest, by distance
 ```
 
 Full contract (params, limits, response/error shapes): [SPEC.md](SPEC.md#functional-requirements).
@@ -94,13 +97,14 @@ data/                  # committed dataset
 
 ## Known Limitations
 
-- Only forward search is implemented — reverse lookup and radius search aren't built yet.
+- Radius search isn't built yet (forward search and reverse lookup both exist).
 - No street-level address parsing (dataset is ZIP/city/state-level).
-- Ranking is trigram similarity only — an exact match elsewhere can outrank a more relevant one.
+- Reverse lookup finds the nearest ZIP _centroid_, not the ZIP whose real boundary
+  contains the point (the dataset has no boundary polygons).
 
 Full list with rationale: [ARCHITECTURE.md](ARCHITECTURE.md#known-limitations).
 
 ## Next Steps
 
-Reverse lookup, radius search, a `Dockerfile` for one-command spin-up, and a few
-smaller items. Full list: [ARCHITECTURE.md](ARCHITECTURE.md#next-steps).
+Radius search, a `Dockerfile` for one-command spin-up, and a few smaller items. Full
+list: [ARCHITECTURE.md](ARCHITECTURE.md#next-steps).

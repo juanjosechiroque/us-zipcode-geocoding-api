@@ -12,6 +12,21 @@ const SELECT_COLUMNS = [
     "longitude",
 ] as const;
 
+function geographyPoint(lat: number, lng: number) {
+    return sql<string>`ST_SetSRID(ST_MakePoint(${lng}, ${lat}), 4326)::geography`;
+}
+
+export async function findNearest(lat: number, lng: number, limit: number): Promise<LocationDto[]> {
+    const point = geographyPoint(lat, lng);
+    return db
+        .selectFrom("zip_codes")
+        .select(SELECT_COLUMNS)
+        .select(sql<number>`ST_Distance(location, ${point})`.as("distance_meters"))
+        .orderBy(sql`location <-> ${point}`)
+        .limit(limit)
+        .execute();
+}
+
 export async function findByZipPrefix(prefix: string, limit: number): Promise<LocationDto[]> {
     return db
         .selectFrom("zip_codes")

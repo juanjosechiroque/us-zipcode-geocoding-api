@@ -158,3 +158,71 @@ describe("GET /v1/locations/search", () => {
         expect(response.status).toBe(400);
     });
 });
+
+describe("GET /v1/locations/reverse", () => {
+    it("returns the exact match with distance_meters: 0 when the coordinate is exact", async () => {
+        const response = await api.get(`${V1}/locations/reverse?lat=34.0901&lng=-118.4065`);
+
+        expect(response.status).toBe(200);
+        expect(response.body.data).toHaveLength(1);
+        expect(response.body.data[0]).toMatchObject({
+            zip_code: "90210",
+            city: "Beverly Hills",
+            distance_meters: 0,
+        });
+    });
+
+    it("defaults to limit=1 when limit is omitted", async () => {
+        const response = await api.get(`${V1}/locations/reverse?lat=34.0901&lng=-118.4065`);
+
+        expect(response.status).toBe(200);
+        expect(response.body.data).toHaveLength(1);
+    });
+
+    it("respects limit and returns results ordered by ascending distance", async () => {
+        const response = await api.get(`${V1}/locations/reverse?lat=34.0901&lng=-118.4065&limit=5`);
+
+        expect(response.status).toBe(200);
+        expect(response.body.data).toHaveLength(5);
+        const distances = response.body.data.map(
+            (row: { distance_meters: number }) => row.distance_meters
+        );
+        expect(distances).toEqual([...distances].sort((a, b) => a - b));
+    });
+
+    it("returns 400 when lat is missing", async () => {
+        const response = await api.get(`${V1}/locations/reverse?lng=-118.4065`);
+
+        expect(response.status).toBe(400);
+        expect(response.body.details).toEqual(
+            expect.arrayContaining([expect.objectContaining({ field: "lat" })])
+        );
+    });
+
+    it("returns 400 when lng is missing", async () => {
+        const response = await api.get(`${V1}/locations/reverse?lat=34.0901`);
+
+        expect(response.status).toBe(400);
+        expect(response.body.details).toEqual(
+            expect.arrayContaining([expect.objectContaining({ field: "lng" })])
+        );
+    });
+
+    it("returns 400 when lat is out of range", async () => {
+        const response = await api.get(`${V1}/locations/reverse?lat=999&lng=0`);
+
+        expect(response.status).toBe(400);
+    });
+
+    it("returns 400 when lng is out of range", async () => {
+        const response = await api.get(`${V1}/locations/reverse?lat=0&lng=-999`);
+
+        expect(response.status).toBe(400);
+    });
+
+    it("returns 400 when limit exceeds the max of 20", async () => {
+        const response = await api.get(`${V1}/locations/reverse?lat=0&lng=0&limit=21`);
+
+        expect(response.status).toBe(400);
+    });
+});

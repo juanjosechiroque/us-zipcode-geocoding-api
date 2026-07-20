@@ -1,7 +1,8 @@
 import type { z } from "zod";
-import type { searchQuerySchema } from "./locations.validation.js";
+import type { reverseQuerySchema, searchQuerySchema } from "./locations.validation.js";
 
 export type SearchQueryInput = z.infer<typeof searchQuerySchema>;
+export type ReverseQueryInput = z.infer<typeof reverseQuerySchema>;
 
 export interface LocationDto {
     zip_code: string;
@@ -11,4 +12,6 @@ export interface LocationDto {
     county: string | null;
     latitude: number;
     longitude: number;
+    // Present only for reverse/radius results, ordered by distance.
+    distance_meters?: number;
 }

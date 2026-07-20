@@ -72,6 +72,12 @@ dataset has no street data. A full address resolves via whatever 5-digit ZIP is
 embedded in it; the street/unit text is never matched against anything. Deliberate
 scope boundary, not an oversight.
 
+`GET /v1/locations/reverse?lat=&lng=&limit=` — KNN via `ORDER BY location <-> point`,
+same GiST index as radius search will use. `distance_meters` is computed alongside and
+only present on this endpoint's rows (`LocationDto` keeps it optional) — search has no
+notion of distance. Verified the exact Kysely-generated SQL still uses
+`zip_codes_location_gist_idx` (`Index Scan`, not a seq scan).
+
 ### Bugs found by testing, not by reading the code
 
 - **Non-deterministic order.** Searching `"York"` returns 14 exact ties with no
@@ -125,14 +131,27 @@ layer, by design.
   relevant result elsewhere, and a short query can rank a long prefix match below an
   unrelated short name. A weighted/boosted ranking would fix both; out of scope here.
 - Full US state names aren't recognized in `"City, State"` input, only 2-letter codes.
-- Only forward search exists — reverse lookup and radius search aren't built yet.
+- Radius search isn't built yet (forward search and reverse lookup both exist).
 - Connection pool size is hardcoded, not env-configurable.
+- **Reverse lookup finds the nearest ZIP _centroid_, not the ZIP whose real (irregular)
+  boundary actually contains the point.** The dataset has no boundary polygons, only
+  one lat/lng per ZIP, so this is a nearest-point search, not point-in-polygon. Near a
+  border between two unevenly-sized ZIPs, the true containing ZIP and the
+  nearest-centroid ZIP can differ. Would need boundary polygon data (e.g. Census
+  TIGER/Line ZCTA shapefiles) to fix — a different, larger dataset than GeoNames.
+- **509 of 41,488 rows (~1.2%) are military/diplomatic ZIPs (APO/FPO/DPO)** with empty
+  `state_code`/`state_name` — GeoNames fills these with `""`, not `null`, unlike
+  `county` which is already nullable. Left as-is: they're real, useful ZIPs (removing
+  them would make reverse lookup give worse answers near overseas military
+  installations), but normalizing `""` → `null` for consistency is a cheap follow-up
+  (see Next Steps).
 
 ## Next Steps
 
-- Reverse lookup and radius search (same patterns: real-data tests, `EXPLAIN ANALYZE`-verified indexes).
+- Radius search (same patterns as reverse lookup: real-data tests, `EXPLAIN ANALYZE`-verified index).
 - Automated idempotency test for ingestion (today it's verified by hand).
 - State-name-to-code mapping for forward search.
 - Prefix-aware ranking so short queries don't bury long, relevant matches.
 - `Dockerfile` + `api` service in `docker-compose.yml` for one-command full-stack spin-up.
 - Make the connection pool size configurable; enable rate limiting by default for real deployment.
+- Normalize empty-string `state_code`/`state_name` to `null` for military/diplomatic ZIPs.
