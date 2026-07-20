@@ -37,10 +37,14 @@ production-mindedness — not feature volume.
 | `q`     | yes      | string | 1–100 chars      |
 | `limit` | no       | int    | 1–50, default 10 |
 
-Behavior:
+Behavior (not a street-address parser — see ARCHITECTURE.md for why):
 
 - `q` matching `^\d{1,5}$` → prefix match against `zip_code`.
-- otherwise → fuzzy/prefix match against `city` (optionally scoped by state if `q` looks like "City, ST").
+- otherwise, if a 5-digit ZIP appears anywhere in `q` (e.g. embedded in a full address)
+  → prefix match against that `zip_code`.
+- otherwise → fuzzy match against `city`, scoped by state if the last comma-separated
+  segment of `q` looks like a 2-letter state code (e.g. `"Beverly Hills, CA"` or
+  `"123 Main St, Beverly Hills, CA"` both resolve to city `"Beverly Hills"` / state `CA`).
 
 Response `200`:
 
@@ -111,8 +115,9 @@ Zero matches → `200` with `data: []`. Invalid params (missing/out of range, `r
   request-id echoed in response headers; `/health` reports DB connectivity.
 - **Error handling**: 400 (validation) vs 404 (single-resource not found, if any) vs 500
   (internal) are always distinguishable, both by status code and by `code` field.
-- **Testing**: critical-path coverage for the 3 endpoints + ingestion idempotency —
-  strategy to be decided in Stage 5, not now.
+- **Testing**: critical-path coverage for the 3 endpoints + ingestion idempotency.
+  Decided (see ARCHITECTURE.md): Vitest + Supertest integration tests against the real
+  ingested Postgres, not mocks — remaining endpoints follow the same approach.
 
 ## Data Source
 

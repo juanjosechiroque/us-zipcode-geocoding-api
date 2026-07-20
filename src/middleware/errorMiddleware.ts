@@ -7,26 +7,25 @@ type ResolvedError = {
     statusCode: number;
     code: string;
     message: string;
+    details?: AppError["details"] | undefined;
 };
 
 function resolveError(err: unknown): ResolvedError {
-    if (err == null || typeof err !== "object") {
-        return { statusCode: 500, code: "InternalServerError", message: "Internal server error" };
-    }
+    const errorLike = err != null && typeof err === "object" ? (err as Partial<AppError>) : {};
+    const statusCode = errorLike.statusCode ?? 500;
 
-    const errorLike = err as Partial<AppError>;
-
-    if (errorLike.statusCode) {
+    if (statusCode < 500) {
         return {
-            statusCode: errorLike.statusCode,
+            statusCode,
             code: errorLike.code ?? "Error",
             message: errorLike.message ?? "Unexpected error",
+            details: errorLike.details,
         };
     }
 
     const isProduction = NODE_ENV === "production";
     return {
-        statusCode: 500,
+        statusCode,
         code: "InternalServerError",
         message: isProduction
             ? "Internal server error"
@@ -39,15 +38,17 @@ export const errorGenericHandler: ErrorRequestHandler = (err, req, res, _next) =
 
     if (resolved.statusCode >= 500) {
         logger.error({ err, requestId: req.id }, "Unhandled request error");
-        if (NODE_ENV === "production") {
-            resolved.message = "Internal server error";
-            resolved.code = "InternalServerError";
-        }
     }
 
-    res.status(resolved.statusCode).json({
+    const body: { status: number; code: string; message: string; details?: AppError["details"] } = {
         status: resolved.statusCode,
         code: resolved.code,
         message: resolved.message,
-    });
+    };
+
+    if (resolved.details != null && Array.isArray(resolved.details)) {
+        body.details = resolved.details;
+    }
+
+    res.status(resolved.statusCode).json(body);
 };

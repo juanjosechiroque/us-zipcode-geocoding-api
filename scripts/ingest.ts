@@ -10,6 +10,11 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_DATA_PATH = path.join(__dirname, "..", "data", "us_zip_codes.csv");
 const BATCH_SIZE = 500;
 
+// Concurrent ingestion runs are safe (Postgres serializes the upserts), but wasteful —
+// both would redundantly parse and push the whole file. An arbitrary constant scoped
+// to this script; the lock is session-bound, so it can't be left stale by a crash.
+const INGEST_LOCK_ID = 947_215_806;
+
 interface ZipRow {
     zip_code: string;
     city: string;
@@ -25,12 +30,8 @@ function loadRows(dataPath: string): ZipRow[] {
     return parse(raw, { columns: true, skip_empty_lines: true, trim: true }) as ZipRow[];
 }
 
-/**
- * Defensive dedup by zip_code (the conflict target). A single INSERT ... ON
- * CONFLICT DO UPDATE statement errors ("cannot affect row a second time") if
- * two input rows share the conflict key, so we collapse duplicates in memory
- * regardless of whether the source file was already cleaned.
- */
+// A single INSERT ... ON CONFLICT DO UPDATE errors if two input rows share the
+// conflict key, so duplicates are collapsed here regardless of source-file cleanliness.
 function dedupeByZip(rows: ZipRow[]): { unique: ZipRow[]; duplicates: number } {
     const byZip = new Map<string, ZipRow>();
     for (const row of rows) {
@@ -104,18 +105,32 @@ async function upsertBatch(pool: Pool, batch: ZipRow[]) {
 
 async function ingest() {
     const dataPath = process.argv[2] ?? DEFAULT_DATA_PATH;
-    const rawRows = loadRows(dataPath);
-    const { unique: rows, duplicates } = dedupeByZip(rawRows);
-
-    logger.info(
-        { dataPath, rawRowCount: rawRows.length, uniqueRowCount: rows.length, duplicates },
-        "Starting ingestion"
-    );
 
     const pool = new Pool({ connectionString: DATABASE_URL });
-    const totals = { inserted: 0, updated: 0, unchanged: 0 };
+    const lockHolder = await pool.connect();
 
     try {
+        const {
+            rows: [lockResult],
+        } = await lockHolder.query<{ locked: boolean }>(
+            "SELECT pg_try_advisory_lock($1) AS locked",
+            [INGEST_LOCK_ID]
+        );
+
+        if (!lockResult?.locked) {
+            logger.warn("Another ingestion is already running — exiting");
+            return;
+        }
+
+        const rawRows = loadRows(dataPath);
+        const { unique: rows, duplicates } = dedupeByZip(rawRows);
+
+        logger.info(
+            { dataPath, rawRowCount: rawRows.length, uniqueRowCount: rows.length, duplicates },
+            "Starting ingestion"
+        );
+
+        const totals = { inserted: 0, updated: 0, unchanged: 0 };
         const batches = chunk(rows, BATCH_SIZE);
         for (const [index, batch] of batches.entries()) {
             const result = await upsertBatch(pool, batch);
@@ -127,6 +142,8 @@ async function ingest() {
 
         logger.info({ ...totals, total: rows.length }, "Ingestion complete");
     } finally {
+        await lockHolder.query("SELECT pg_advisory_unlock($1)", [INGEST_LOCK_ID]);
+        lockHolder.release();
         await pool.end();
     }
 }

@@ -1,6 +1,7 @@
 export type AppError = Error & {
     code: string;
     statusCode: number;
+    details?: Array<Record<string, unknown>>;
 };
 
 function createAppError(message: string, code: string, statusCode: number): AppError {
@@ -9,6 +10,9 @@ function createAppError(message: string, code: string, statusCode: number): AppE
     err.statusCode = statusCode;
     return err;
 }
+
+export const BadRequestError = (errorMessage: string) =>
+    createAppError(errorMessage, "BadRequestError", 400);
 
 export const NotFoundError = (errorMessage: string) =>
     createAppError(errorMessage, "NotFoundError", 404);

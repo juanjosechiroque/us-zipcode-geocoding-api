@@ -68,6 +68,10 @@ export default defineConfig([
             "@typescript-eslint/no-unsafe-argument": "off",
             "@typescript-eslint/no-unsafe-call": "off",
             "@typescript-eslint/no-unsafe-return": "off",
+            // False positive with vitest mocks: expect(mockFn).toHaveBeenCalledWith(...)
+            // passes the mock by reference without invoking it, which this rule can't
+            // distinguish from an actual unbound-`this` hazard.
+            "@typescript-eslint/unbound-method": "off",
         },
     },
     eslintConfigPrettier,

@@ -31,10 +31,11 @@ if (NODE_ENV !== "test") {
             customSuccessMessage: () => "request completed",
             customErrorMessage: () => "request failed",
             serializers: {
-                req: (req: Record<string, unknown>) => ({
+                req: (req: Record<string, unknown> & { query?: unknown }) => ({
                     id: req["id"],
                     method: req["method"],
                     url: req["url"],
+                    query: req.query,
                 }),
                 res: (res: Record<string, unknown>) => ({ statusCode: res["statusCode"] }),
             },
@@ -59,6 +60,8 @@ if (NODE_ENV !== "test" && RATE_LIMIT_WINDOW_MINUTES && RATE_LIMIT_MAX) {
             limit: RATE_LIMIT_MAX,
             standardHeaders: true,
             legacyHeaders: false,
+            // Search has its own, more permissive limiter — see locations.router.ts.
+            skip: (req) => req.path === "/v1/locations/search",
         })
     );
 }
