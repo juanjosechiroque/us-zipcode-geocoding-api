@@ -1,0 +1,42 @@
+# Dependencies
+node_modules/
+
+# Environment variables
+.env
+.env.*
+!.env.example
+
+# Logs
+logs
+*.log
+npm-debug.log*
+
+# Runtime files
+pids
+*.pid
+*.pid.lock
+
+# Coverage
+coverage/
+.nyc_output/
+
+# Build / dist
+dist/
+
+# Cache
+.cache
+.eslintcache
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor folders
+.vscode/
+.idea/
+
+# Local Claude Code settings
+.claude/
+
+# Output of npm pack
+*.tgz

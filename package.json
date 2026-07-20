@@ -1,0 +1,61 @@
+{
+    "name": "zipcodes-api",
+    "version": "1.0.0",
+    "description": "Geocoding API over US ZIP code data: forward search, reverse lookup, and radius search on PostgreSQL + PostGIS",
+    "main": "dist/index.js",
+    "type": "module",
+    "scripts": {
+        "start": "NODE_ENV=production node dist/index.js",
+        "dev": "NODE_ENV=development nodemon index.ts",
+        "build": "tsc",
+        "validate": "eslint . && prettier --check .",
+        "format": "prettier --write . && eslint . --fix",
+        "prepare": "husky || true",
+        "test": "vitest run",
+        "test:coverage": "vitest run --coverage",
+        "typecheck": "tsc --project tsconfig.check.json"
+    },
+    "keywords": [
+        "express",
+        "typescript",
+        "postgres",
+        "postgis",
+        "geocoding",
+        "rest-api"
+    ],
+    "author": "juanjosechiroque",
+    "license": "MIT",
+    "engines": {
+        "node": ">=24"
+    },
+    "dependencies": {
+        "cors": "^2.8.5",
+        "express": "^5.0.1",
+        "express-rate-limit": "^7.4.1",
+        "helmet": "^8.0.0",
+        "pino": "^9.6.0",
+        "pino-http": "^10.4.0",
+        "zod": "^3.24.1"
+    },
+    "devDependencies": {
+        "@eslint/js": "^9.18.0",
+        "@types/cors": "^2.8.19",
+        "@types/express": "^5.0.6",
+        "@types/node": "^22.10.5",
+        "@types/supertest": "^6.0.2",
+        "@vitest/coverage-v8": "^2.1.8",
+        "dotenv": "^16.4.7",
+        "eslint": "^9.18.0",
+        "eslint-config-prettier": "^10.1.8",
+        "globals": "^15.14.0",
+        "husky": "^9.1.7",
+        "nodemon": "^3.1.9",
+        "pino-pretty": "^13.0.0",
+        "prettier": "^3.4.2",
+        "supertest": "^7.0.0",
+        "tsx": "^4.19.2",
+        "typescript": "^5.7.3",
+        "typescript-eslint": "^8.19.1",
+        "vitest": "^2.1.8"
+    }
+}

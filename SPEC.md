@@ -32,57 +32,73 @@ production-mindedness — not feature volume.
 
 ### 1. Forward search — `GET /v1/locations/search`
 
-| Param | Required | Type | Constraints |
-|---|---|---|---|
-| `q` | yes | string | 1–100 chars |
-| `limit` | no | int | 1–50, default 10 |
+| Param   | Required | Type   | Constraints      |
+| ------- | -------- | ------ | ---------------- |
+| `q`     | yes      | string | 1–100 chars      |
+| `limit` | no       | int    | 1–50, default 10 |
 
 Behavior:
+
 - `q` matching `^\d{1,5}$` → prefix match against `zip_code`.
 - otherwise → fuzzy/prefix match against `city` (optionally scoped by state if `q` looks like "City, ST").
 
 Response `200`:
+
 ```json
 {
-  "status": 200,
-  "message": "success",
-  "data": [
-    { "zip_code": "90210", "city": "Beverly Hills", "state_code": "CA",
-      "state_name": "California", "county": "Los Angeles", "latitude": 34.0901, "longitude": -118.4065 }
-  ]
+    "status": 200,
+    "message": "success",
+    "data": [
+        {
+            "zip_code": "90210",
+            "city": "Beverly Hills",
+            "state_code": "CA",
+            "state_name": "California",
+            "county": "Los Angeles",
+            "latitude": 34.0901,
+            "longitude": -118.4065
+        }
+    ]
 }
 ```
+
 No matches → `200` with `data: []` (a search returning nothing is not an error).
 Invalid/missing `q` → `400`.
 
 ### 2. Reverse lookup — `GET /v1/locations/reverse`
 
-| Param | Required | Type | Constraints |
-|---|---|---|---|
-| `lat` | yes | float | -90..90 |
-| `lng` | yes | float | -180..180 |
-| `limit` | no | int | 1–20, default 1 |
+| Param   | Required | Type  | Constraints     |
+| ------- | -------- | ----- | --------------- |
+| `lat`   | yes      | float | -90..90         |
+| `lng`   | yes      | float | -180..180       |
+| `limit` | no       | int   | 1–20, default 1 |
 
 Response `200`: array ordered by distance ascending, each row includes `distance_meters`.
 Invalid/missing `lat`/`lng` → `400`.
 
 ### 3. Radius search — `GET /v1/locations/radius`
 
-| Param | Required | Type | Constraints |
-|---|---|---|---|
-| `lat` | yes | float | -90..90 |
-| `lng` | yes | float | -180..180 |
-| `radius_km` | yes | float | >0, capped at 500 |
-| `limit` | no | int | 1–200, default 50 |
+| Param       | Required | Type  | Constraints       |
+| ----------- | -------- | ----- | ----------------- |
+| `lat`       | yes      | float | -90..90           |
+| `lng`       | yes      | float | -180..180         |
+| `radius_km` | yes      | float | >0, capped at 500 |
+| `limit`     | no       | int   | 1–200, default 50 |
 
 Response `200`: array ordered by distance ascending, each row includes `distance_meters`.
 Zero matches → `200` with `data: []`. Invalid params (missing/out of range, `radius_km` > cap) → `400`.
 
 ### Error shape (all endpoints)
+
 ```json
-{ "status": 400, "code": "BadRequestError", "message": "Validation failed",
-  "details": [{ "field": "lat", "error": "Number must be >= -90" }] }
+{
+    "status": 400,
+    "code": "BadRequestError",
+    "message": "Validation failed",
+    "details": [{ "field": "lat", "error": "Number must be >= -90" }]
+}
 ```
+
 `500` responses never leak stack traces or internal messages in production.
 
 ## Non-Functional Requirements (acceptance criteria)
@@ -106,7 +122,8 @@ Converted to `data/us_zip_codes.csv` (`zip_code,city,state_code,state_name,count
 committed to the repo so setup works cold with no network dependency at ingest time.
 
 ## Locked Decisions
-*(rationale for each lives in `ARCHITECTURE.md` — this list is reference only)*
+
+_(rationale for each lives in `ARCHITECTURE.md` — this list is reference only)_
 
 - Stack (constraint from the assessment): Node.js + TypeScript
 - Framework: Express 5
