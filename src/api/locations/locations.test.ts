@@ -196,6 +196,14 @@ describe("GET /v1/locations/reverse", () => {
         );
     });
 
+    it("returns 400 when lat or lng is an empty string", async () => {
+        const emptyLat = await api.get(`${V1}/locations/reverse?lat=&lng=-118.4065`);
+        const emptyLng = await api.get(`${V1}/locations/reverse?lat=34.0901&lng=`);
+
+        expect(emptyLat.status).toBe(400);
+        expect(emptyLng.status).toBe(400);
+    });
+
     it("returns 400 when lng is missing", async () => {
         const response = await api.get(`${V1}/locations/reverse?lat=34.0901`);
 
@@ -260,6 +268,19 @@ describe("GET /v1/locations/radius", () => {
         expect(response.body.data).toHaveLength(3);
     });
 
+    it("defaults to 20 results and caps the requested limit at 50", async () => {
+        const defaultLimit = await api.get(
+            `${V1}/locations/radius?lat=34.0901&lng=-118.4065&radius_km=50`
+        );
+        const tooHigh = await api.get(
+            `${V1}/locations/radius?lat=34.0901&lng=-118.4065&radius_km=50&limit=51`
+        );
+
+        expect(defaultLimit.status).toBe(200);
+        expect(defaultLimit.body.data).toHaveLength(20);
+        expect(tooHigh.status).toBe(400);
+    });
+
     it("returns 200 with an empty array when nothing is within the radius", async () => {
         const response = await api.get(`${V1}/locations/radius?lat=0&lng=0&radius_km=1`);
 
@@ -298,9 +319,9 @@ describe("GET /v1/locations/radius", () => {
         expect(badLng.status).toBe(400);
     });
 
-    it("returns 400 when limit exceeds the max of 200", async () => {
+    it("returns 400 when limit exceeds the max of 50", async () => {
         const response = await api.get(
-            `${V1}/locations/radius?lat=34.0901&lng=-118.4065&radius_km=10&limit=201`
+            `${V1}/locations/radius?lat=34.0901&lng=-118.4065&radius_km=10&limit=51`
         );
 
         expect(response.status).toBe(400);

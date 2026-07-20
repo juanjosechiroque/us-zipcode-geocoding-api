@@ -87,10 +87,12 @@ Invalid/missing `lat`/`lng` → `400`.
 | `lat`       | yes      | float | -90..90           |
 | `lng`       | yes      | float | -180..180         |
 | `radius_km` | yes      | float | >0, capped at 500 |
-| `limit`     | no       | int   | 1–200, default 50 |
+| `limit`     | no       | int   | 1–50, default 20  |
 
 Response `200`: array ordered by distance ascending, each row includes `distance_meters`.
 Zero matches → `200` with `data: []`. Invalid params (missing/out of range, `radius_km` > cap) → `400`.
+The result set is bounded, not paginated: at most 50 nearest matches inside the radius
+are returned, and there is currently no second-page cursor.
 
 ### Error shape (all endpoints)
 

@@ -3,6 +3,11 @@
 A geocoding API over US ZIP code data: forward search, reverse lookup, and radius
 search. Express + TypeScript + PostgreSQL/PostGIS.
 
+The domain is a directory of **postal-code records and their representative point
+coordinates**, derived from GeoNames. It is not a street-address database, a map of ZIP
+boundaries, or a Census ZCTA dataset. Reverse and radius operations compare coordinates
+with those representative points.
+
 Requirements and locked decisions: [SPEC.md](SPEC.md). This README stays thin on
 purpose — full reasoning and rejected alternatives live in [ARCHITECTURE.md](ARCHITECTURE.md).
 
@@ -59,6 +64,9 @@ curl "localhost:3000/v1/locations/reverse?lat=34.0901&lng=-118.4065&limit=5"    
 curl "localhost:3000/v1/locations/radius?lat=34.0901&lng=-118.4065&radius_km=5"   # everything within 5km
 ```
 
+Radius responses default to the nearest 20 matches and accept `limit=1..50`. This is
+a bounded result set, not cursor pagination; the API does not currently expose later pages.
+
 Full contract (params, limits, response/error shapes): [SPEC.md](SPEC.md#functional-requirements).
 
 ## Development
@@ -78,7 +86,9 @@ Tests run against a real Postgres, not mocks — see [why](ARCHITECTURE.md#testi
 
 `data/us_zip_codes.csv` (GeoNames `US.zip`, CC BY 4.0) is committed so setup works
 offline. `npm run db:ingest` is idempotent, safe to re-run anytime — including against
-a refreshed copy of the source file. Details: [ARCHITECTURE.md](ARCHITECTURE.md#data-ingestion).
+a refreshed copy of the source file. All batches commit as one transaction, so a failed
+run does not publish a partial refresh. Details: [ARCHITECTURE.md](ARCHITECTURE.md#data-ingestion)
+and [DATA_LICENSE.md](DATA_LICENSE.md).
 
 ## Project structure
 

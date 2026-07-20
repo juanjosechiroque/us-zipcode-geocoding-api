@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { parse } from "csv-parse/sync";
-import { Pool } from "pg";
+import { Pool, type PoolClient } from "pg";
 import { DATABASE_URL } from "../src/config.js";
 import logger from "../src/utils/logger.js";
 
@@ -12,7 +12,7 @@ const BATCH_SIZE = 500;
 
 const INGEST_LOCK_ID = 947_215_806;
 
-interface ZipRow {
+export interface ZipRow {
     zip_code: string;
     city: string;
     state_code: string;
@@ -43,7 +43,7 @@ function chunk<T>(items: T[], size: number): T[][] {
     return chunks;
 }
 
-async function upsertBatch(pool: Pool, batch: ZipRow[]) {
+async function upsertBatch(client: PoolClient, batch: ZipRow[]) {
     const columns = [
         "zip_code",
         "city",
@@ -91,11 +91,32 @@ async function upsertBatch(pool: Pool, batch: ZipRow[]) {
         RETURNING (xmax = 0) AS inserted
     `;
 
-    const result = await pool.query<{ inserted: boolean }>(query, values);
+    const result = await client.query<{ inserted: boolean }>(query, values);
     const inserted = result.rows.filter((row) => row.inserted).length;
     const updated = result.rows.length - inserted;
     const unchanged = batch.length - result.rows.length;
     return { inserted, updated, unchanged };
+}
+
+export async function upsertBatchesAtomically(client: PoolClient, batches: ZipRow[][]) {
+    const totals = { inserted: 0, updated: 0, unchanged: 0 };
+
+    await client.query("BEGIN");
+    try {
+        for (const [index, batch] of batches.entries()) {
+            const result = await upsertBatch(client, batch);
+            totals.inserted += result.inserted;
+            totals.updated += result.updated;
+            totals.unchanged += result.unchanged;
+            logger.info({ batch: index + 1, of: batches.length, ...result }, "Batch upserted");
+        }
+        await client.query("COMMIT");
+        return totals;
+    } catch (error) {
+        await client.query("ROLLBACK");
+        logger.error({ err: error }, "Ingestion transaction rolled back");
+        throw error;
+    }
 }
 
 async function ingest() {
@@ -125,15 +146,8 @@ async function ingest() {
             "Starting ingestion"
         );
 
-        const totals = { inserted: 0, updated: 0, unchanged: 0 };
         const batches = chunk(rows, BATCH_SIZE);
-        for (const [index, batch] of batches.entries()) {
-            const result = await upsertBatch(pool, batch);
-            totals.inserted += result.inserted;
-            totals.updated += result.updated;
-            totals.unchanged += result.unchanged;
-            logger.info({ batch: index + 1, of: batches.length, ...result }, "Batch upserted");
-        }
+        const totals = await upsertBatchesAtomically(lockHolder, batches);
 
         logger.info({ ...totals, total: rows.length }, "Ingestion complete");
     } finally {
@@ -143,7 +157,12 @@ async function ingest() {
     }
 }
 
-ingest().catch((err: unknown) => {
-    logger.error({ err }, "Ingestion failed");
-    process.exit(1);
-});
+const isMainModule =
+    process.argv[1] != null && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+
+if (isMainModule) {
+    ingest().catch((err: unknown) => {
+        logger.error({ err }, "Ingestion failed");
+        process.exit(1);
+    });
+}

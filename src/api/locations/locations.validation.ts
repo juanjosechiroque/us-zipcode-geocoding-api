@@ -1,19 +1,24 @@
 import { z } from "zod";
 
+const queryNumber = z.preprocess(
+    (value) => (typeof value === "string" && value.trim() === "" ? undefined : value),
+    z.coerce.number().finite()
+);
+
 export const searchQuerySchema = z.object({
     q: z.string().trim().min(1).max(100),
-    limit: z.coerce.number().int().min(1).max(50).default(10),
+    limit: queryNumber.pipe(z.number().int().min(1).max(50)).default(10),
 });
 
 export const reverseQuerySchema = z.object({
-    lat: z.coerce.number().min(-90).max(90),
-    lng: z.coerce.number().min(-180).max(180),
-    limit: z.coerce.number().int().min(1).max(20).default(1),
+    lat: queryNumber.pipe(z.number().min(-90).max(90)),
+    lng: queryNumber.pipe(z.number().min(-180).max(180)),
+    limit: queryNumber.pipe(z.number().int().min(1).max(20)).default(1),
 });
 
 export const radiusQuerySchema = z.object({
-    lat: z.coerce.number().min(-90).max(90),
-    lng: z.coerce.number().min(-180).max(180),
-    radius_km: z.coerce.number().positive().max(500),
-    limit: z.coerce.number().int().min(1).max(200).default(50),
+    lat: queryNumber.pipe(z.number().min(-90).max(90)),
+    lng: queryNumber.pipe(z.number().min(-180).max(180)),
+    radius_km: queryNumber.pipe(z.number().positive().max(500)),
+    limit: queryNumber.pipe(z.number().int().min(1).max(50)).default(20),
 });

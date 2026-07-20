@@ -15,6 +15,18 @@ Errors flow through one path: handlers `throw` an `AppError` with a `statusCode`
 `asyncHandler` forwards rejected promises into the same path, so a thrown error in an
 `async` controller can't crash the process silently.
 
+## Domain Definition
+
+A location in this service is a GeoNames US postal-code record with a city/state label
+and a representative latitude/longitude. The point is treated as a postal-code centroid
+for nearest-distance calculations. The service does **not** model deliverable street
+addresses, ZIP boundary polygons, or Census ZIP Code Tabulation Areas (ZCTAs). Therefore:
+
+- forward search resolves postal codes and locality labels, not a street address;
+- reverse search means “nearest known postal-code point,” not “the polygon containing
+  this coordinate”;
+- radius search returns postal-code points inside the requested geodesic distance.
+
 ## Decisions Log
 
 **Express 5 + TypeScript, not Fastify.** Reused the hygiene of a personal starter repo
@@ -46,6 +58,12 @@ let them drift out of sync.
 WHERE <changed> RETURNING (xmax = 0)`. That last trick tells inserted rows from updated
 ones, and the `WHERE` clause skips rows that didn't actually change — so the script
 reports real inserted/updated/unchanged counts, not just "done."
+
+All batches execute on one connection inside a single transaction. Batching keeps each
+statement reasonably sized, while the transaction makes the publication atomic: either
+every batch commits or a failure rolls back the complete run. For this ~41k-row dataset,
+the bounded transaction is an acceptable trade-off. A much larger or continuously
+served dataset should use a staging table plus a short transactional swap/merge instead.
 
 - **Idempotent**, verified: run #1 inserts 41,488 rows; run #2 reports 0/0/41,488 unchanged.
 - **Source changes** re-ingest safely — the conflict target is the natural key (`zip_code`).
@@ -123,6 +141,23 @@ search and reverse.
   `429`; one env var away from being live.
 - **Query params are structured in logs** (`req.query`), not just embedded in the URL string.
 
+### Production policies to decide before deployment
+
+- **Remote reverse results:** the current API always returns the nearest known point,
+  even when it is far away. Product policy should choose between a hard maximum distance,
+  returning a `match_quality`/distance for the consumer to assess, or requiring callers
+  to provide their own maximum. A caller-provided `max_distance_km` is the most flexible;
+  a server-side safety ceiling prevents obviously misleading ocean results.
+- **Cancelled requests:** baseline protection is a PostgreSQL `statement_timeout` so
+  abandoned work is bounded. Stronger options are propagating request cancellation to
+  the database driver or routing expensive work through a separately limited pool. The
+  recommended production combination is a per-query timeout plus cancellation when the
+  HTTP connection closes.
+- **Rate limits:** start with 60 search requests per 10 seconds and 120 reverse requests
+  per minute per API key, but only 30 radius requests per minute because radius queries
+  are more expensive. Enforce this in a shared gateway/store when running more than one
+  replica; in-memory per-process counters are only suitable for local evaluation.
+
 ## Testing
 
 Integration tests run against the real ingested Postgres, not mocks — mocking Kysely
@@ -134,6 +169,8 @@ layer, by design.
 ## Known Limitations
 
 - No street-level address parsing (dataset is ZIP/city/state-level only).
+- Reverse lookup has no maximum-distance confidence threshold yet, so it can return a
+  technically nearest but operationally irrelevant point for remote coordinates.
 - Ranking is trigram similarity only — exact matches in one state can outrank a more
   relevant result elsewhere, and a short query can rank a long prefix match below an
   unrelated short name. A weighted/boosted ranking would fix both; out of scope here.

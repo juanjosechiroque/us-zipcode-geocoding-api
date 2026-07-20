@@ -1,0 +1,43 @@
+name: CI
+
+on:
+    push:
+        branches: [main]
+    pull_request:
+
+jobs:
+    verify:
+        runs-on: ubuntu-latest
+        timeout-minutes: 15
+        services:
+            postgres:
+                image: postgis/postgis:16-3.4-alpine
+                env:
+                    POSTGRES_USER: postgres
+                    POSTGRES_PASSWORD: postgres
+                    POSTGRES_DB: zipcodes_test
+                ports:
+                    - 5432:5432
+                options: >-
+                    --health-cmd "pg_isready -U postgres -d zipcodes_test"
+                    --health-interval 5s
+                    --health-timeout 5s
+                    --health-retries 10
+
+        env:
+            NODE_ENV: test
+            DATABASE_URL: postgres://postgres:postgres@localhost:5432/zipcodes_test
+
+        steps:
+            - uses: actions/checkout@v4
+            - uses: actions/setup-node@v4
+              with:
+                  node-version-file: .nvmrc
+                  cache: npm
+            - run: npm ci
+            - run: npm run db:migrate
+            - run: npm run db:ingest
+            - run: npm run typecheck
+            - run: npm run validate
+            - run: npm run build
+            - run: npm test
