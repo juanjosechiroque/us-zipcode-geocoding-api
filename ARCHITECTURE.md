@@ -91,6 +91,49 @@ this API is built around.
 writes lat/lng — it can't drift out of sync with the derived geography value, and there
 is no second code path that has to remember to keep both in sync.
 
+## Data Ingestion
+
+### Idempotency mechanism
+
+`scripts/ingest.ts` reads `data/us_zip_codes.csv` and upserts in batches of 500 rows via
+`INSERT ... ON CONFLICT (zip_code) DO UPDATE SET ... WHERE <any column actually
+changed> RETURNING (xmax = 0) AS inserted`. The `xmax = 0` trick tells inserted rows
+apart from updated ones (Postgres sets `xmax` on a row when it's touched by an update
+within the same transaction), and the `WHERE <changed>` clause means a row that
+conflicts but has identical data is skipped entirely — it never shows up in `RETURNING`
+and `updated_at` isn't bumped for no reason. That's how the script reports real
+inserted/updated/unchanged counts instead of just "N rows processed."
+
+**Running it twice** on the same file: run #1 inserts ~41,488 rows; run #2 reports 0
+inserted, 0 updated, all 41,488 unchanged — verified by hand this session.
+
+**If the source dataset changes** (GeoNames re-publishes with corrected coordinates or
+renamed cities): re-run `npm run db:ingest` against the refreshed CSV. Existing zip
+codes get updated in place (their `updated_at` moves forward), new zip codes get
+inserted, and nothing needs to be deleted/reset first — the conflict target is the
+natural key (`zip_code`), not a generated surrogate id.
+
+### Duplicate zip codes are a real failure mode, not just a data-quality footnote
+
+GeoNames' raw file has 41,489 rows but only 41,488 unique ZIP codes (2 military-base
+ZIPs in Hawaii appear twice). This matters beyond "clean data": a single
+`INSERT ... ON CONFLICT DO UPDATE` statement raises `ON CONFLICT DO UPDATE command
+cannot affect row a second time` if two rows in the _same_ statement share the conflict
+key — and since batches are sequential 500-row chunks of a file sorted by ZIP, a
+duplicate is likely to land in the same batch as its twin. Handled in two layers: the
+raw-to-CSV conversion already dedupes (keeps the first occurrence), and
+`scripts/ingest.ts` _additionally_ collapses rows into a `Map<zip_code, row>` before
+batching, regardless of whether the input file was already clean — so a future source
+with more duplicates degrades to "last row wins" instead of crashing mid-run with some
+batches applied and others not.
+
+### Dataset provenance
+
+GeoNames `US.zip` (`download.geonames.org/export/zip/US.zip`), licensed CC BY 4.0
+(attribution: geonames.org). Committed as `data/us_zip_codes.csv` so setup works cold,
+with no network dependency at ingest time — only the one-time conversion (documented in
+the README) needs to reach the source.
+
 ## API Design
 
 _Added in Stage 4._
