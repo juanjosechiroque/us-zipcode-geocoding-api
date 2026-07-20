@@ -60,7 +60,6 @@ if (NODE_ENV !== "test" && RATE_LIMIT_WINDOW_MINUTES && RATE_LIMIT_MAX) {
             limit: RATE_LIMIT_MAX,
             standardHeaders: true,
             legacyHeaders: false,
-            // Search has its own, more permissive limiter — see locations.router.ts.
             skip: (req) => req.path === "/v1/locations/search",
         })
     );

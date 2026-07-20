@@ -45,12 +45,8 @@ export async function findByCity(
     let builder = db
         .selectFrom("zip_codes")
         .select(SELECT_COLUMNS)
-        // Prefix OR similarity: trigram similarity alone misses short input (e.g. "Be"
-        // scores too low to match "Beverly") — prefix covers early autocomplete typing,
-        // similarity still covers typo tolerance for longer input.
         .where(sql<boolean>`(city ILIKE ${query + "%"} OR city % ${query})`)
         .orderBy(sql`similarity(city, ${query})`, "desc")
-        // Tie-break for determinism: equal-similarity rows aren't guaranteed stable order otherwise.
         .orderBy("city", "asc")
         .orderBy("zip_code", "asc")
         .limit(limit);

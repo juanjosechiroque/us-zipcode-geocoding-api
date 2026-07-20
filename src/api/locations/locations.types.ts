@@ -12,6 +12,5 @@ export interface LocationDto {
     county: string | null;
     latitude: number;
     longitude: number;
-    // Present only for reverse/radius results, ordered by distance.
     distance_meters?: number;
 }

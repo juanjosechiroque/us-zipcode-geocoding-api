@@ -1,5 +1,3 @@
--- Idempotent schema definition. Safe to run repeatedly (CREATE ... IF NOT EXISTS everywhere).
-
 CREATE EXTENSION IF NOT EXISTS postgis;
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
 
@@ -17,14 +15,10 @@ CREATE TABLE IF NOT EXISTS zip_codes (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- Radius search (ST_DWithin) and reverse/nearest lookup (KNN via <->) both use this.
 CREATE INDEX IF NOT EXISTS zip_codes_location_gist_idx ON zip_codes USING GIST (location);
 
--- Fuzzy/prefix autocomplete on city name (pg_trgm supports both similarity() and ILIKE '%x%').
 CREATE INDEX IF NOT EXISTS zip_codes_city_trgm_idx ON zip_codes USING GIN (city gin_trgm_ops);
 
--- This DB's en_US.utf8 collation can't serve `zip_code LIKE 'prefix%'` from a plain
--- btree (needs "C" collation or text_pattern_ops) — verified with EXPLAIN ANALYZE.
 CREATE INDEX IF NOT EXISTS zip_codes_zip_prefix_idx ON zip_codes (zip_code text_pattern_ops);
 
 CREATE INDEX IF NOT EXISTS zip_codes_state_code_idx ON zip_codes (state_code);

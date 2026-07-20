@@ -78,8 +78,6 @@ describe("GET /v1/locations/search", () => {
         );
 
         expect(response.status).toBe(200);
-        // Other "___ Hills, CA" cities can rank below the exact match (see Known
-        // Limitations) — assert the best match wins the top spot, not every row.
         expect(response.body.data[0]).toMatchObject({ city: "Beverly Hills", state_code: "CA" });
         for (const row of response.body.data) {
             expect(row.state_code).toBe("CA");
@@ -92,7 +90,6 @@ describe("GET /v1/locations/search", () => {
         );
 
         expect(response.status).toBe(200);
-        // Must not misread "Illinois" as the city name (a real, previously-found bug).
         expect(response.body.data.length).toBeGreaterThan(0);
         for (const row of response.body.data) {
             expect(row.city).toBe("Springfield");

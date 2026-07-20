@@ -17,9 +17,7 @@ export default defineConfig({
                 "src/tests/**",
                 "vitest.config.ts",
                 "eslint.config.js",
-                // Entry point (app.listen) is never imported by tests — that would bind a real port.
                 "index.ts",
-                // Ambient type-augmentation files are picked up by tsconfig, never imported at runtime.
                 "src/**/*.d.ts",
             ],
         },

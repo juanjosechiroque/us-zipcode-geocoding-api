@@ -13,7 +13,6 @@ const envSchema = z
         CORS_ALLOWED_ORIGINS: z.string().trim().optional(),
         RATE_LIMIT_WINDOW_MINUTES: z.coerce.number().int().positive().optional(),
         RATE_LIMIT_MAX: z.coerce.number().int().positive().optional(),
-        // Separate, more permissive limit for autocomplete search (see ARCHITECTURE.md).
         SEARCH_RATE_LIMIT_WINDOW_SECONDS: z.coerce.number().int().positive().optional(),
         SEARCH_RATE_LIMIT_MAX: z.coerce.number().int().positive().optional(),
         LOG_LEVEL: z.enum(["trace", "debug", "info", "warn", "error", "fatal"]).default("info"),

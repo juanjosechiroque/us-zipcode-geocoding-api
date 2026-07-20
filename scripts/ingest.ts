@@ -10,9 +10,6 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_DATA_PATH = path.join(__dirname, "..", "data", "us_zip_codes.csv");
 const BATCH_SIZE = 500;
 
-// Concurrent ingestion runs are safe (Postgres serializes the upserts), but wasteful —
-// both would redundantly parse and push the whole file. An arbitrary constant scoped
-// to this script; the lock is session-bound, so it can't be left stale by a crash.
 const INGEST_LOCK_ID = 947_215_806;
 
 interface ZipRow {
@@ -30,8 +27,6 @@ function loadRows(dataPath: string): ZipRow[] {
     return parse(raw, { columns: true, skip_empty_lines: true, trim: true }) as ZipRow[];
 }
 
-// A single INSERT ... ON CONFLICT DO UPDATE errors if two input rows share the
-// conflict key, so duplicates are collapsed here regardless of source-file cleanliness.
 function dedupeByZip(rows: ZipRow[]): { unique: ZipRow[]; duplicates: number } {
     const byZip = new Map<string, ZipRow>();
     for (const row of rows) {
