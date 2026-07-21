@@ -24,7 +24,7 @@ function chunk<T>(items: T[], size: number): T[][] {
     return chunks;
 }
 
-async function upsertBatch(client: PoolClient, batch: ValidatedZipRow[]) {
+async function insertStagingBatch(client: PoolClient, batch: ValidatedZipRow[]) {
     const columns = [
         "zip_code",
         "city",
@@ -52,8 +52,52 @@ async function upsertBatch(client: PoolClient, batch: ValidatedZipRow[]) {
         .join(", ");
 
     const query = `
-        INSERT INTO zip_codes (${columns.join(", ")})
+        INSERT INTO incoming_zip_codes (${columns.join(", ")})
         VALUES ${placeholders}
+    `;
+
+    await client.query(query, values);
+}
+
+interface SnapshotChanges {
+    inserted: number;
+    updated: number;
+    deleted: number;
+}
+
+async function calculateSnapshotChanges(client: PoolClient): Promise<SnapshotChanges> {
+    const result = await client.query<SnapshotChanges>(`
+        SELECT
+            count(*) FILTER (WHERE existing.zip_code IS NULL)::integer AS inserted,
+            count(*) FILTER (
+                WHERE incoming.zip_code IS NOT NULL
+                  AND existing.zip_code IS NOT NULL
+                  AND (
+                    existing.city IS DISTINCT FROM incoming.city OR
+                    existing.state_code IS DISTINCT FROM incoming.state_code OR
+                    existing.state_name IS DISTINCT FROM incoming.state_name OR
+                    existing.county IS DISTINCT FROM incoming.county OR
+                    existing.latitude IS DISTINCT FROM incoming.latitude OR
+                    existing.longitude IS DISTINCT FROM incoming.longitude
+                  )
+            )::integer AS updated,
+            count(*) FILTER (WHERE incoming.zip_code IS NULL)::integer AS deleted
+        FROM incoming_zip_codes AS incoming
+        FULL OUTER JOIN zip_codes AS existing
+          ON existing.zip_code = incoming.zip_code
+    `);
+
+    return result.rows[0] ?? { inserted: 0, updated: 0, deleted: 0 };
+}
+
+async function publishSnapshot(client: PoolClient) {
+    await client.query(`
+        INSERT INTO zip_codes (
+            zip_code, city, state_code, state_name, county, latitude, longitude
+        )
+        SELECT
+            zip_code, city, state_code, state_name, county, latitude, longitude
+        FROM incoming_zip_codes
         ON CONFLICT (zip_code) DO UPDATE SET
             city = EXCLUDED.city,
             state_code = EXCLUDED.state_code,
@@ -69,28 +113,52 @@ async function upsertBatch(client: PoolClient, batch: ValidatedZipRow[]) {
             zip_codes.county IS DISTINCT FROM EXCLUDED.county OR
             zip_codes.latitude IS DISTINCT FROM EXCLUDED.latitude OR
             zip_codes.longitude IS DISTINCT FROM EXCLUDED.longitude
-        RETURNING (xmax = 0) AS inserted
-    `;
+    `);
 
-    const result = await client.query<{ inserted: boolean }>(query, values);
-    const inserted = result.rows.filter((row) => row.inserted).length;
-    const updated = result.rows.length - inserted;
-    const unchanged = batch.length - result.rows.length;
-    return { inserted, updated, unchanged };
+    await client.query(`
+        DELETE FROM zip_codes AS existing
+        WHERE NOT EXISTS (
+            SELECT 1
+            FROM incoming_zip_codes AS incoming
+            WHERE incoming.zip_code = existing.zip_code
+        )
+    `);
 }
 
-export async function upsertBatchesAtomically(client: PoolClient, batches: ValidatedZipRow[][]) {
-    const totals = { inserted: 0, updated: 0, unchanged: 0 };
+export async function reconcileSnapshotAtomically(
+    client: PoolClient,
+    batches: ValidatedZipRow[][]
+) {
+    const incomingRows = batches.reduce((total, batch) => total + batch.length, 0);
 
     await client.query("BEGIN");
     try {
+        await client.query(`
+            CREATE TEMP TABLE incoming_zip_codes (
+                zip_code TEXT PRIMARY KEY,
+                city TEXT NOT NULL,
+                state_code TEXT NOT NULL,
+                state_name TEXT NOT NULL,
+                county TEXT,
+                latitude DOUBLE PRECISION NOT NULL,
+                longitude DOUBLE PRECISION NOT NULL
+            ) ON COMMIT DROP
+        `);
+
         for (const [index, batch] of batches.entries()) {
-            const result = await upsertBatch(client, batch);
-            totals.inserted += result.inserted;
-            totals.updated += result.updated;
-            totals.unchanged += result.unchanged;
-            logger.info({ batch: index + 1, of: batches.length, ...result }, "Batch upserted");
+            await insertStagingBatch(client, batch);
+            logger.info(
+                { batch: index + 1, of: batches.length, rows: batch.length },
+                "Staging batch loaded"
+            );
         }
+
+        const changes = await calculateSnapshotChanges(client);
+        const unchanged = incomingRows - changes.inserted - changes.updated;
+        const totals = { ...changes, unchanged };
+
+        logger.info(totals, "Snapshot changes calculated");
+        await publishSnapshot(client);
         await client.query("COMMIT");
         return totals;
     } catch (error) {
@@ -106,7 +174,7 @@ export async function ingestRows(
     batchSize = BATCH_SIZE
 ) {
     const batches = chunk(rows, batchSize);
-    const totals = await upsertBatchesAtomically(client, batches);
+    const totals = await reconcileSnapshotAtomically(client, batches);
 
     return {
         ...totals,

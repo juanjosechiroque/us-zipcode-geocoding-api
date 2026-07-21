@@ -54,16 +54,17 @@ let them drift out of sync.
 
 ## Data Ingestion
 
-`scripts/ingest.ts` upserts in batches of 500: `INSERT ... ON CONFLICT DO UPDATE ...
-WHERE <changed> RETURNING (xmax = 0)`. That last trick tells inserted rows from updated
-ones, and the `WHERE` clause skips rows that didn't actually change — so the script
-reports real inserted/updated/unchanged counts, not just "done."
+`scripts/ingest.ts` treats each CSV as the complete authoritative snapshot. After
+validation it opens one transaction, creates a temporary staging table, and loads it in
+batches of 500. A comparison against `zip_codes` produces real
+inserted/updated/unchanged/deleted counts; changed rows are upserted and rows absent from
+staging are deleted.
 
-All batches execute on one connection inside a single transaction. Batching keeps each
-statement reasonably sized, while the transaction makes the publication atomic: either
-every batch commits or a failure rolls back the complete run. For this ~41k-row dataset,
-the bounded transaction is an acceptable trade-off. A much larger or continuously
-served dataset should use a staging table plus a short transactional swap/merge instead.
+Staging, merge, and deletion execute on one connection inside that transaction. Readers
+continue seeing the previous committed snapshot until the new one commits; any failure
+rolls back the complete publication. For this ~41k-row dataset, the bounded transaction
+is an acceptable trade-off. A much larger dataset should use bulk loading into persistent
+run-scoped staging followed by a shorter publication transaction.
 
 The complete file is parsed and validated before `BEGIN`; malformed source data cannot
 publish even one batch. Headers must be exactly `zip_code`, `city`, `state_code`,
@@ -74,10 +75,11 @@ present. Empty state fields are accepted only for the source's APO/FPO/DPO recor
 counties normalize to `NULL`. Validation scans every row, logs the total issue count and
 the first 20 details, then fails the run as one unit.
 
-- **Idempotent**, verified: run #1 inserts 41,488 rows; run #2 reports 0/0/41,488 unchanged.
-- **Source changes** re-ingest safely for inserts and updates — the conflict target is
-  the natural key (`zip_code`). Rows removed from a future source are deliberately not
-  deleted yet; snapshot synchronization needs an explicit retention policy.
+- **Idempotent**, verified: run #1 inserts 41,488 rows; run #2 reports zero inserts,
+  updates, or deletes and 41,488 unchanged.
+- **Source changes** reconcile completely — `zip_code` is the natural key, and rows absent
+  from the next validated snapshot are hard-deleted. There are no downstream foreign keys
+  or history requirements that would justify soft deletes in this read-only directory.
 - **Duplicates are classified before persistence.** Rows that are equivalent after the
   documented normalization collapse and are counted. Two different records claiming the
   same ZIP fail validation because silently choosing first or last would hide an ambiguous
@@ -199,9 +201,15 @@ leading-zero ZIPs, military/diplomatic exceptions, and identical versus conflict
 duplicates. A transaction-boundary test additionally proves invalid CSV never issues
 `BEGIN`.
 
+Snapshot reconciliation is tested against PostgreSQL for inserts, updates, unchanged
+rows, hard deletes, repeat-run idempotency, and rollback when deletion fails.
+
 ## Known Limitations
 
 - No street-level address parsing (dataset is ZIP/city/state-level only).
+- Ingestion assumes each validated CSV is a complete trusted snapshot. A syntactically
+  valid but incomplete source would remove absent ZIPs; production automation should add
+  source-level completeness checks if that failure mode becomes credible.
 - Reverse lookup has no maximum-distance confidence threshold yet, so it can return a
   technically nearest but operationally irrelevant point for remote coordinates.
 - Cursor pages are stateless and do not hold a database snapshot across HTTP requests.
@@ -227,8 +235,6 @@ duplicates. A transaction-boundary test additionally proves invalid CSV never is
 
 ## Next Steps
 
-- Define snapshot deletion semantics for ZIPs removed from a refreshed source, then
-  implement them through staging-table reconciliation.
 - State-name-to-code mapping for forward search.
 - Prefix-aware ranking so short queries don't bury long, relevant matches.
 - `Dockerfile` + `api` service in `docker-compose.yml` for one-command full-stack spin-up.

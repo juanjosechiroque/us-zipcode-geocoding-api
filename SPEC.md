@@ -41,8 +41,9 @@ production-mindedness — not feature volume.
   Blank county is stored as `NULL`.
 - Identical duplicate ZIP rows collapse and are counted. Conflicting records for one ZIP
   reject the complete source.
-- Publish all batches in one transaction. Re-running the same valid source makes no data
-  changes. Deletion of records absent from a later source is not part of version 1.
+- Treat the validated CSV as the complete authoritative snapshot. Load it through
+  temporary staging, upsert new/changed rows, and hard-delete records absent from the
+  source in one transaction. Re-running the same source makes no data changes.
 
 ## Functional Requirements
 
