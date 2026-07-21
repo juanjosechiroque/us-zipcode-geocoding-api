@@ -82,17 +82,35 @@ Invalid/missing `lat`/`lng` → `400`.
 
 ### 3. Radius search — `GET /v1/locations/radius`
 
-| Param       | Required | Type  | Constraints       |
-| ----------- | -------- | ----- | ----------------- |
-| `lat`       | yes      | float | -90..90           |
-| `lng`       | yes      | float | -180..180         |
-| `radius_km` | yes      | float | >0, capped at 500 |
-| `limit`     | no       | int   | 1–50, default 20  |
+| Param       | Required | Type   | Constraints                          |
+| ----------- | -------- | ------ | ------------------------------------ |
+| `lat`       | yes      | float  | -90..90                              |
+| `lng`       | yes      | float  | -180..180                            |
+| `radius_km` | yes      | float  | >0, capped at 500                    |
+| `limit`     | no       | int    | 1–50, default 20                     |
+| `cursor`    | no       | string | Opaque cursor from the previous page |
 
-Response `200`: array ordered by distance ascending, each row includes `distance_meters`.
-Zero matches → `200` with `data: []`. Invalid params (missing/out of range, `radius_km` > cap) → `400`.
-The result set is bounded, not paginated: at most 50 nearest matches inside the radius
-are returned, and there is currently no second-page cursor.
+Response `200`: array ordered by `distance_meters`, then `zip_code`; each row includes
+`distance_meters`. The `meta` object indicates whether another page exists:
+
+```json
+{
+    "status": 200,
+    "message": "success",
+    "data": [],
+    "meta": {
+        "limit": 20,
+        "has_more": true,
+        "next_cursor": "eyJ2ZXJzaW9uIjoxLC4uLn0"
+    }
+}
+```
+
+Pass `next_cursor` unchanged as the next request's `cursor`. The cursor is tied to the
+original `lat`, `lng`, and `radius_km`; reusing it with different parameters or sending
+a malformed cursor returns `400`. The final page has `has_more: false` and
+`next_cursor: null`. Across all pages, the client can retrieve every matching location.
+Zero matches → `200` with `data: []` and no next cursor.
 
 ### Error shape (all endpoints)
 

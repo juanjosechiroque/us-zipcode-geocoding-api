@@ -19,3 +19,23 @@ export interface LocationDto {
     longitude: number;
     distance_meters?: number;
 }
+
+export interface LocationWithDistanceDto extends LocationDto {
+    distance_meters: number;
+}
+
+export interface RadiusCursorPosition {
+    distance_meters: number;
+    zip_code: string;
+}
+
+export interface PaginationMeta {
+    limit: number;
+    has_more: boolean;
+    next_cursor: string | null;
+}
+
+export interface PaginatedLocations {
+    data: LocationWithDistanceDto[];
+    meta: PaginationMeta;
+}

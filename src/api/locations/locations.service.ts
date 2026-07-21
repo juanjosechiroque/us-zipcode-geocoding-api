@@ -1,10 +1,12 @@
 import * as locationsRepository from "./locations.repository.js";
 import type {
     LocationDto,
+    PaginatedLocations,
     RadiusQueryInput,
     ReverseQueryInput,
     SearchQueryInput,
 } from "./locations.types.js";
+import { decodeRadiusCursor, encodeRadiusCursor } from "./locations.cursor.js";
 
 const ZIP_ONLY_PATTERN = /^\d{1,5}$/;
 const ZIP_ANYWHERE_PATTERN = /\b\d{5}\b/;
@@ -43,11 +45,34 @@ export async function getNearestLocations({
     return locationsRepository.findNearest(lat, lng, limit);
 }
 
-export async function getLocationsWithinRadius({
-    lat,
-    lng,
-    radius_km,
-    limit,
-}: RadiusQueryInput): Promise<LocationDto[]> {
-    return locationsRepository.findWithinRadius(lat, lng, radius_km, limit);
+export async function getLocationsWithinRadius(
+    query: RadiusQueryInput
+): Promise<PaginatedLocations> {
+    const { lat, lng, radius_km, limit, cursor } = query;
+    const position = cursor ? decodeRadiusCursor(cursor, query) : null;
+    const rows = await locationsRepository.findWithinRadius(
+        lat,
+        lng,
+        radius_km,
+        limit + 1,
+        position
+    );
+    const hasMore = rows.length > limit;
+    const data = rows.slice(0, limit);
+    const last = data.at(-1);
+
+    return {
+        data,
+        meta: {
+            limit,
+            has_more: hasMore,
+            next_cursor:
+                hasMore && last
+                    ? encodeRadiusCursor(query, {
+                          distance_meters: last.distance_meters,
+                          zip_code: last.zip_code,
+                      })
+                    : null,
+        },
+    };
 }

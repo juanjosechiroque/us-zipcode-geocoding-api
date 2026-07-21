@@ -29,6 +29,6 @@ export async function radiusLocationsHandler(
     req: RequestWithValidatedQuery<RadiusQueryInput>,
     res: Response
 ) {
-    const results = await getLocationsWithinRadius(req.validatedQuery);
-    sendResponse(res, 200, results);
+    const result = await getLocationsWithinRadius(req.validatedQuery);
+    sendResponse(res, 200, result.data, "success", result.meta);
 }

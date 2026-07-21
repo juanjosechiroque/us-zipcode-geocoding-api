@@ -241,6 +241,7 @@ describe("GET /v1/locations/radius", () => {
         expect(response.status).toBe(200);
         expect(response.body.data).toHaveLength(1);
         expect(response.body.data[0]).toMatchObject({ zip_code: "90210", distance_meters: 0 });
+        expect(response.body.meta).toEqual({ limit: 20, has_more: false, next_cursor: null });
     });
 
     it("returns all locations within a larger radius, ordered by ascending distance", async () => {
@@ -266,6 +267,57 @@ describe("GET /v1/locations/radius", () => {
 
         expect(response.status).toBe(200);
         expect(response.body.data).toHaveLength(3);
+        expect(response.body.meta).toMatchObject({ limit: 3, has_more: true });
+        expect(response.body.meta.next_cursor).toEqual(expect.any(String));
+    });
+
+    it("retrieves every radius result across cursor pages without duplicates", async () => {
+        const rows: Array<{ zip_code: string; distance_meters: number }> = [];
+        let cursor: string | null = null;
+
+        do {
+            const cursorParam = cursor ? `&cursor=${encodeURIComponent(cursor)}` : "";
+            const response = await api.get(
+                `${V1}/locations/radius?lat=34.0901&lng=-118.4065&radius_km=5&limit=5${cursorParam}`
+            );
+
+            expect(response.status).toBe(200);
+            expect(response.body.meta.limit).toBe(5);
+            rows.push(...response.body.data);
+            cursor = response.body.meta.next_cursor as string | null;
+        } while (cursor);
+
+        expect(rows).toHaveLength(12);
+        expect(new Set(rows.map((row) => row.zip_code)).size).toBe(12);
+        expect(rows).toEqual(
+            [...rows].sort(
+                (left, right) =>
+                    left.distance_meters - right.distance_meters ||
+                    left.zip_code.localeCompare(right.zip_code)
+            )
+        );
+    });
+
+    it("returns 400 for a malformed cursor", async () => {
+        const response = await api.get(
+            `${V1}/locations/radius?lat=34.0901&lng=-118.4065&radius_km=5&cursor=not-valid!`
+        );
+
+        expect(response.status).toBe(400);
+        expect(response.body).toMatchObject({ code: "BadRequestError", message: "Invalid cursor" });
+    });
+
+    it("returns 400 when a cursor is reused with different radius parameters", async () => {
+        const firstPage = await api.get(
+            `${V1}/locations/radius?lat=34.0901&lng=-118.4065&radius_km=5&limit=3`
+        );
+        const cursor = encodeURIComponent(firstPage.body.meta.next_cursor as string);
+        const response = await api.get(
+            `${V1}/locations/radius?lat=34.0901&lng=-118.4065&radius_km=10&limit=3&cursor=${cursor}`
+        );
+
+        expect(response.status).toBe(400);
+        expect(response.body).toMatchObject({ code: "BadRequestError", message: "Invalid cursor" });
     });
 
     it("defaults to 20 results and caps the requested limit at 50", async () => {
@@ -286,6 +338,7 @@ describe("GET /v1/locations/radius", () => {
 
         expect(response.status).toBe(200);
         expect(response.body.data).toEqual([]);
+        expect(response.body.meta).toEqual({ limit: 20, has_more: false, next_cursor: null });
     });
 
     it("returns 400 when radius_km is missing", async () => {

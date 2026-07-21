@@ -96,12 +96,21 @@ only present on reverse/radius rows (`LocationDto` keeps it optional) — search
 notion of distance. Verified the exact Kysely-generated SQL still uses
 `zip_codes_location_gist_idx` (`Index Scan`, not a seq scan).
 
-`GET /v1/locations/radius?lat=&lng=&radius_km=&limit=` — `ST_DWithin` for the bounding
-filter, `ST_Distance` for both the returned `distance_meters` and the ordering. Verified
-the exact query still uses `zip_codes_location_gist_idx` (`Bitmap Index Scan`, same
+`GET /v1/locations/radius?lat=&lng=&radius_km=&limit=&cursor=` — `ST_DWithin` for the
+bounding filter, `ST_Distance` for both the returned `distance_meters` and the ordering.
+Verified the base query uses `zip_codes_location_gist_idx` (`Bitmap Index Scan`, same
 plan shape as the manual verification done before either endpoint was built). Zero
 matches inside the radius return `200` with `data: []`, not `404` — consistent with
 search and reverse.
+
+Radius uses keyset pagination ordered by `(distance_meters, zip_code)`, not offset
+pagination. The repository requests `limit + 1`, so the service can produce `has_more`
+without a separate `COUNT(*)`. The next cursor is URL-safe Base64-encoded JSON containing
+the last ordering position, a format version, and the original radius parameters. It is
+validated as opaque input and rejected if reused with a different query. The cursor is
+not encrypted or signed; this read-only API treats it as untrusted, parameterized input.
+Following cursors allows consumers to retrieve all matches while each response remains
+bounded to 20 by default and 50 at most.
 
 ### Bugs found by testing, not by reading the code
 
@@ -151,8 +160,12 @@ search and reverse.
 - **Cancelled requests:** baseline protection is a PostgreSQL `statement_timeout` so
   abandoned work is bounded. Stronger options are propagating request cancellation to
   the database driver or routing expensive work through a separately limited pool. The
-  recommended production combination is a per-query timeout plus cancellation when the
-  HTTP connection closes.
+  installed Kysely/`pg` query contract does not expose an `AbortSignal`, so racing the
+  promise would abandon only the HTTP response while the database keeps working. Real
+  cancellation would need to retain the query connection's PostgreSQL backend PID and
+  call `pg_cancel_backend` from a separate control connection, or add driver-level abort
+  support. The recommended production combination is a per-query timeout first, then
+  verified database cancellation when the HTTP connection closes.
 - **Rate limits:** start with 60 search requests per 10 seconds and 120 reverse requests
   per minute per API key, but only 30 radius requests per minute because radius queries
   are more expensive. Enforce this in a shared gateway/store when running more than one
@@ -171,6 +184,9 @@ layer, by design.
 - No street-level address parsing (dataset is ZIP/city/state-level only).
 - Reverse lookup has no maximum-distance confidence threshold yet, so it can return a
   technically nearest but operationally irrelevant point for remote coordinates.
+- Cursor pages are stateless and do not hold a database snapshot across HTTP requests.
+  An atomic dataset refresh between pages can change later results; refreshes are rare,
+  and the trade-off avoids keeping transactions and connections open for clients.
 - Ranking is trigram similarity only — exact matches in one state can outrank a more
   relevant result elsewhere, and a short query can rank a long prefix match below an
   unrelated short name. A weighted/boosted ranking would fix both; out of scope here.

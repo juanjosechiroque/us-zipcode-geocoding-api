@@ -62,10 +62,12 @@ curl "localhost:3000/v1/locations/reverse?lat=34.0901&lng=-118.4065"            
 curl "localhost:3000/v1/locations/reverse?lat=34.0901&lng=-118.4065&limit=5"      # 5 nearest, by distance
 
 curl "localhost:3000/v1/locations/radius?lat=34.0901&lng=-118.4065&radius_km=5"   # everything within 5km
+curl "localhost:3000/v1/locations/radius?lat=34.0901&lng=-118.4065&radius_km=5&limit=20&cursor=<next_cursor>"
 ```
 
-Radius responses default to the nearest 20 matches and accept `limit=1..50`. This is
-a bounded result set, not cursor pagination; the API does not currently expose later pages.
+Radius responses use cursor pagination, default to 20 matches, and accept `limit=1..50`.
+When `meta.has_more` is true, pass `meta.next_cursor` unchanged to retrieve the next
+page. Following cursors until `next_cursor` is `null` returns every match in the radius.
 
 Full contract (params, limits, response/error shapes): [SPEC.md](SPEC.md#functional-requirements).
 
@@ -94,7 +96,7 @@ and [DATA_LICENSE.md](DATA_LICENSE.md).
 
 ```
 src/
-  api/<resource>/    # router → controller → service → repository
+  api/<resource>/    # router → controller → service → repository, cursor helpers
   middleware/        # request-id, error handling, validation
   utils/             # logger, response envelope, asyncHandler
   config.ts          # Zod-validated env

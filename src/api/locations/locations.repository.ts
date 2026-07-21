@@ -1,6 +1,10 @@
 import { sql } from "kysely";
 import { db } from "../../database.js";
-import type { LocationDto } from "./locations.types.js";
+import type {
+    LocationDto,
+    LocationWithDistanceDto,
+    RadiusCursorPosition,
+} from "./locations.types.js";
 
 const SELECT_COLUMNS = [
     "zip_code",
@@ -31,18 +35,31 @@ export async function findWithinRadius(
     lat: number,
     lng: number,
     radiusKm: number,
-    limit: number
-): Promise<LocationDto[]> {
+    limit: number,
+    cursor: RadiusCursorPosition | null
+): Promise<LocationWithDistanceDto[]> {
     const point = geographyPoint(lat, lng);
     const radiusMeters = radiusKm * 1000;
-    return db
+    const distance = sql<number>`ST_Distance(location, ${point})`;
+    let builder = db
         .selectFrom("zip_codes")
         .select(SELECT_COLUMNS)
-        .select(sql<number>`ST_Distance(location, ${point})`.as("distance_meters"))
+        .select(distance.as("distance_meters"))
         .where(sql<boolean>`ST_DWithin(location, ${point}, ${radiusMeters})`)
-        .orderBy(sql`ST_Distance(location, ${point})`, "asc")
-        .limit(limit)
-        .execute();
+        .orderBy(distance, "asc")
+        .orderBy("zip_code", "asc")
+        .limit(limit);
+
+    if (cursor) {
+        builder = builder.where(
+            sql<boolean>`(
+                ${distance} > ${cursor.distance_meters}
+                OR (${distance} = ${cursor.distance_meters} AND zip_code > ${cursor.zip_code})
+            )`
+        );
+    }
+
+    return builder.execute();
 }
 
 export async function findByZipPrefix(prefix: string, limit: number): Promise<LocationDto[]> {
