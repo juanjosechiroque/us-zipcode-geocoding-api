@@ -7,8 +7,9 @@ being built, see [SPEC.md](./SPEC.md) — this doc covers _why_, and what was re
 
 `index.ts` boots the server and owns process lifecycle (listen, graceful shutdown).
 `src/app.ts` wires the middleware stack: `helmet` → request-id → logging → `cors` →
-rate limiting → JSON body → router → 404 → error handler. Every request carries an
-`x-request-id`, echoed in the response header and in every log line for that request.
+JSON body → router → 404 → error handler. The locations router adds optional rate
+limiting before its endpoints. Every request carries an `x-request-id`, echoed in the
+response header and in every log line for that request.
 
 Errors flow through one path: handlers `throw` an `AppError` with a `statusCode`, and
 `errorMiddleware.ts` is the only place that turns that into an HTTP response.
@@ -157,10 +158,11 @@ bounded to 20 by default and 50 at most.
 - **Load-tested, not just single-request.** 100 and 300 concurrent requests against the
   real dataset: 100% success, p50 ~170-185ms, no errors. The bounded connection pool
   (`max: 10`) queues rather than fails — that's the documented bottleneck under heavier load.
-- **Rate limiting is implemented and tested, but off by default.** Search has its own,
-  more permissive limiter, separate from the general one — verified working when
-  enabled. Off in `.env.example` so evaluating this repo locally never hits a surprise
-  `429`; one env var away from being live.
+- **Rate limiting is implemented and tested, but off by default.** One per-IP policy
+  covers every `/v1/locations` endpoint; `/health` is outside that router and never
+  consumes location quota. The suggested starting point is 60 requests per minute.
+  Enabling it requires the two paired variables in `.env.example`; a custom handler
+  preserves the API's JSON error contract for `429` responses.
 - **Query params are structured in logs** (`req.query`), not just embedded in the URL string.
 
 ### Production policies to decide before deployment
@@ -179,10 +181,10 @@ bounded to 20 by default and 50 at most.
   call `pg_cancel_backend` from a separate control connection, or add driver-level abort
   support. The recommended production combination is a per-query timeout first, then
   verified database cancellation when the HTTP connection closes.
-- **Rate limits:** start with 60 search requests per 10 seconds and 120 reverse requests
-  per minute per API key, but only 30 radius requests per minute because radius queries
-  are more expensive. Enforce this in a shared gateway/store when running more than one
-  replica; in-memory per-process counters are only suitable for local evaluation.
+- **Distributed rate limits:** the current in-memory counter is appropriate for this
+  single-instance assessment. Multiple API replicas should enforce the same policy in a
+  shared gateway or store; adding Redis here without that deployment need would be
+  premature.
 
 ## Testing
 
@@ -238,5 +240,5 @@ rows, hard deletes, repeat-run idempotency, and rollback when deletion fails.
 - State-name-to-code mapping for forward search.
 - Prefix-aware ranking so short queries don't bury long, relevant matches.
 - `Dockerfile` + `api` service in `docker-compose.yml` for one-command full-stack spin-up.
-- Make the connection pool size configurable; enable rate limiting by default for real deployment.
+- Make the connection pool size configurable; configure rate limiting at deployment.
 - Normalize empty-string `state_code`/`state_name` to `null` for military/diplomatic ZIPs.

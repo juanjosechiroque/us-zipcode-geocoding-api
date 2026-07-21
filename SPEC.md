@@ -142,6 +142,10 @@ Zero matches → `200` with `data: []` and no next cursor.
 
 `500` responses never leak stack traces or internal messages in production.
 
+When rate limiting is enabled, all `/v1/locations` endpoints share one per-IP quota and
+return `429` with `code: "RateLimitExceeded"` when it is exhausted. `/v1/health` is not
+rate-limited. The local default is off; `.env.example` suggests 60 requests per minute.
+
 ## Non-Functional Requirements (acceptance criteria)
 
 - **Performance**: `search` (autocomplete-shaped) must be index-backed (GIN/pg_trgm), not
@@ -152,6 +156,8 @@ Zero matches → `200` with `data: []` and no next cursor.
   request-id echoed in response headers; `/health` reports DB connectivity.
 - **Error handling**: 400 (validation) vs 404 (single-resource not found, if any) vs 500
   (internal) are always distinguishable, both by status code and by `code` field.
+- **Rate limiting**: one optional per-IP limiter for location endpoints, with standard
+  headers and a JSON `429` response; no distributed store is required for this assessment.
 - **Testing**: critical-path coverage for the 3 endpoints + ingestion idempotency.
   Decided (see ARCHITECTURE.md): Vitest + Supertest integration tests against the real
   ingested Postgres, not mocks — remaining endpoints follow the same approach.

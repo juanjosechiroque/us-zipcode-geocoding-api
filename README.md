@@ -84,6 +84,19 @@ npm run format          # eslint --fix + prettier --write
 
 Tests run against a real Postgres, not mocks — see [why](ARCHITECTURE.md#testing).
 
+## Optional rate limiting
+
+Location endpoints can share a per-IP limit by uncommenting both values in `.env`:
+
+```env
+RATE_LIMIT_WINDOW_MINUTES=1
+RATE_LIMIT_MAX=60
+```
+
+It is off by default for local evaluation. `/v1/health` is never rate-limited. The
+in-memory counter is suitable for one API instance; use a shared gateway or store when
+deploying multiple replicas.
+
 ## Refreshing the dataset
 
 `data/us_zip_codes.csv` (GeoNames `US.zip`, CC BY 4.0) is committed so setup works

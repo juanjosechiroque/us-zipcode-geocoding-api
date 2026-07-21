@@ -1,8 +1,8 @@
 import { Router } from "express";
-import rateLimit from "express-rate-limit";
 import { asyncHandler } from "../../utils/asyncHandler.js";
 import { validateQuery } from "../../middleware/validationMiddleware.js";
-import { NODE_ENV, SEARCH_RATE_LIMIT_MAX, SEARCH_RATE_LIMIT_WINDOW_SECONDS } from "../../config.js";
+import { NODE_ENV, RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_MINUTES } from "../../config.js";
+import { createApiRateLimiter } from "../../middleware/rateLimitMiddleware.js";
 import {
     radiusQuerySchema,
     reverseQuerySchema,
@@ -16,22 +16,11 @@ import {
 
 const router = Router();
 
-const searchRateLimiter =
-    NODE_ENV !== "test" && SEARCH_RATE_LIMIT_WINDOW_SECONDS && SEARCH_RATE_LIMIT_MAX
-        ? rateLimit({
-              windowMs: SEARCH_RATE_LIMIT_WINDOW_SECONDS * 1000,
-              limit: SEARCH_RATE_LIMIT_MAX,
-              standardHeaders: true,
-              legacyHeaders: false,
-          })
-        : (_req: unknown, _res: unknown, next: () => void) => next();
+if (NODE_ENV !== "test" && RATE_LIMIT_WINDOW_MINUTES && RATE_LIMIT_MAX) {
+    router.use(createApiRateLimiter(RATE_LIMIT_WINDOW_MINUTES * 60 * 1000, RATE_LIMIT_MAX));
+}
 
-router.get(
-    "/search",
-    searchRateLimiter,
-    validateQuery(searchQuerySchema),
-    asyncHandler(searchLocationsHandler)
-);
+router.get("/search", validateQuery(searchQuerySchema), asyncHandler(searchLocationsHandler));
 
 router.get("/reverse", validateQuery(reverseQuerySchema), asyncHandler(reverseLocationsHandler));
 

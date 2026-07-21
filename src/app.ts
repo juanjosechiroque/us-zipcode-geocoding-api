@@ -1,5 +1,4 @@
 import express from "express";
-import rateLimit from "express-rate-limit";
 import { pinoHttp } from "pino-http";
 import cors from "cors";
 import helmet from "helmet";
@@ -8,12 +7,7 @@ import router from "./router.js";
 import { errorGenericHandler } from "./middleware/errorMiddleware.js";
 import { notFound } from "./middleware/notFoundMiddleware.js";
 import { requestIdMiddleware } from "./middleware/requestIdMiddleware.js";
-import {
-    CORS_ALLOWED_ORIGINS,
-    NODE_ENV,
-    RATE_LIMIT_MAX,
-    RATE_LIMIT_WINDOW_MINUTES,
-} from "./config.js";
+import { CORS_ALLOWED_ORIGINS, NODE_ENV } from "./config.js";
 import logger from "./utils/logger.js";
 
 const app = express();
@@ -49,18 +43,6 @@ if (CORS_ALLOWED_ORIGINS) {
     app.use(
         cors({
             origin: allowedOrigins.includes("*") ? "*" : allowedOrigins,
-        })
-    );
-}
-
-if (NODE_ENV !== "test" && RATE_LIMIT_WINDOW_MINUTES && RATE_LIMIT_MAX) {
-    app.use(
-        rateLimit({
-            windowMs: RATE_LIMIT_WINDOW_MINUTES * 60 * 1000,
-            limit: RATE_LIMIT_MAX,
-            standardHeaders: true,
-            legacyHeaders: false,
-            skip: (req) => req.path === "/v1/locations/search",
         })
     );
 }
