@@ -1,0 +1,14 @@
+.git
+.github
+.husky
+.env
+.env.*
+!.env.example
+node_modules
+dist
+coverage
+logs
+*.log
+.DS_Store
+.vscode
+.idea

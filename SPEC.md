@@ -1,76 +1,36 @@
-# SPEC: US ZIP Geocoding API
+# API Contract
 
-**Status:** Assessment contract implemented. Product and deployment questions remain in
-[ARCHITECTURE.md](ARCHITECTURE.md#open-production-questions).
-**Version:** 1.0
-**Last updated:** 2026-07-20
+- **Status:** Implemented
+- **Version:** 1.0
+- **Last updated:** 2026-07-21
 
-## Problem Statement
+## Scope
 
-Build a backend service that turns a public US ZIP code dataset into a geocoding API:
-forward search (partial address/city/ZIP → matching locations), reverse lookup
-(lat/lng → nearest location), and radius search (lat/lng + distance → all locations in
-range). Evaluated on architecture decisions, API design, data modeling, and
-production-mindedness — not feature volume.
+The service exposes US ZIP-code forward search, nearest-location lookup, and radius
+search. Results represent GeoNames postal-code records with city/state labels and one
+representative coordinate.
 
-## Goals
-
-- Three working endpoints (search, reverse, radius) with external-consumption-grade
-  error handling and status codes.
-- Repeatable, idempotent, observable data ingestion.
-- Documented performance/scalability reasoning, not just working code.
-- A codebase another senior engineer could pick up cold.
-
-## Non-Goals (out of scope)
-
-- Authentication / authorization.
-- Countries other than the US.
-- A UI/frontend.
-- Write endpoints (create/update/delete locations) — the dataset is read-only reference data.
-- Full OpenAPI document (not required for the assessment; recommended before external
-  client integration).
+Authentication, write endpoints, other countries, a UI, and an OpenAPI document are
+outside this assessment.
 
 ## Data Ingestion Contract
 
-- Input is a CSV with exactly these headers, in any order: `zip_code`, `city`,
-  `state_code`, `state_name`, `county`, `latitude`, `longitude`.
-- Validate the whole source before opening the write transaction. On failure, report the
-  total number of issues and retain at most the first 20 structured details.
-- ZIP is exactly five digits; city is required; coordinates are finite and within
-  latitude `[-90, 90]` and longitude `[-180, 180]`. City, state name, and county have a
-  maximum length of 150 characters; a present state code is exactly two letters.
-- State code and name are jointly present. Both may be empty only for APO/FPO/DPO rows.
-  Blank county is stored as `NULL`.
-- Identical duplicate ZIP rows collapse and are counted. Conflicting records for one ZIP
-  reject the complete source.
-- Treat the validated CSV as the complete authoritative snapshot. Load it through
-  temporary staging, upsert new/changed rows, and hard-delete records absent from the
-  source in one transaction. Re-running the same source makes no data changes.
+- Input is a CSV with these headers in any order: `zip_code`, `city`, `state_code`,
+  `state_name`, `county`, `latitude`, `longitude`.
+- The complete file is validated before the write transaction. Failures report the total
+  issue count and at most the first 20 details.
+- ZIP is exactly five digits; city is required and at most 150 characters. State name
+  and county are at most 150 characters; a present state code is exactly two letters.
+  Coordinates must be finite and within latitude `[-90, 90]` and longitude `[-180, 180]`.
+- State code and name must be present together. Both may be empty only for APO/FPO/DPO
+  rows. Blank county is stored as `NULL`.
+- Equivalent duplicate ZIP rows collapse; conflicting duplicates reject the source.
+- The CSV is authoritative. Staging, upserts, and deletion of absent ZIPs occur in one
+  transaction. Re-running the same source makes no data changes.
 
-## Functional Requirements
+## Common Response
 
-### 1. Forward search — `GET /v1/locations/search`
-
-| Param   | Required | Type   | Constraints                       |
-| ------- | -------- | ------ | --------------------------------- |
-| `q`     | yes      | string | 1–100 chars; no `%`, `_`, or `\\` |
-| `limit` | no       | int    | 1–50, default 10                  |
-
-Behavior (not a street-address parser — see ARCHITECTURE.md for why):
-
-- `q` matching `^\d{1,5}$` → prefix match against `zip_code`.
-- otherwise, if a 5-digit ZIP appears anywhere in `q` (e.g. embedded in a full address)
-  → prefix match against that `zip_code`.
-- otherwise → fuzzy match against `city`, scoped by state if the last comma-separated
-  segment of `q` looks like a 2-letter state code (e.g. `"Beverly Hills, CA"` or
-  `"123 Main St, Beverly Hills, CA"` both resolve to city `"Beverly Hills"` / state `CA`).
-- One- and two-character city queries use prefix matching only. Fuzzy/trigram matching
-  starts at three characters. Numeric ZIP prefixes remain valid from one digit.
-- City results rank exact matches first, literal prefixes second, and other trigram
-  matches third. Similarity descending, city, state code, and ZIP provide deterministic
-  ordering inside those tiers.
-
-Response `200`:
+Successful location endpoints return:
 
 ```json
 {
@@ -90,38 +50,57 @@ Response `200`:
 }
 ```
 
-No matches → `200` with `data: []` (a search returning nothing is not an error).
-Invalid/missing `q` → `400`.
+`county` may be `null`; military/diplomatic records may have empty state fields.
+Reverse and radius results additionally include `distance_meters`. A collection with no
+matches returns `200` with `data: []`.
 
-### 2. Reverse lookup — `GET /v1/locations/reverse`
+## Forward Search
 
-| Param   | Required | Type  | Constraints     |
-| ------- | -------- | ----- | --------------- |
-| `lat`   | yes      | float | -90..90         |
-| `lng`   | yes      | float | -180..180       |
-| `limit` | no       | int   | 1–20, default 1 |
+`GET /v1/locations/search`
 
-Response `200`: array ordered by distance ascending, each row includes `distance_meters`.
-Invalid/missing `lat`/`lng` → `400`.
+| Parameter | Required | Constraints                                           |
+| --------- | -------- | ----------------------------------------------------- |
+| `q`       | yes      | Trimmed string, 1–100 characters; no `%`, `_`, or `\` |
+| `limit`   | no       | Integer 1–50; default 10                              |
 
-### 3. Radius search — `GET /v1/locations/radius`
+Matching rules:
 
-| Param       | Required | Type   | Constraints                          |
-| ----------- | -------- | ------ | ------------------------------------ |
-| `lat`       | yes      | float  | -90..90                              |
-| `lng`       | yes      | float  | -180..180                            |
-| `radius_km` | yes      | float  | >0, capped at 500                    |
-| `limit`     | no       | int    | 1–50, default 20                     |
-| `cursor`    | no       | string | Opaque cursor from the previous page |
+- One to five digits: ZIP-prefix search.
+- A five-digit ZIP inside a longer input: search by that ZIP.
+- Otherwise: city search, optionally scoped by a final two-letter state code.
+- One- and two-character cities use prefix matching. From three characters, prefix and
+  trigram matching are combined.
+- City results rank exact, prefix, then fuzzy matches with deterministic tie-breakers.
 
-Response `200`: array ordered by `distance_meters`, then `zip_code`; each row includes
-`distance_meters`. The `meta` object indicates whether another page exists:
+## Reverse Lookup
+
+`GET /v1/locations/reverse`
+
+| Parameter | Required | Constraints                    |
+| --------- | -------- | ------------------------------ |
+| `lat`     | yes      | Finite number from -90 to 90   |
+| `lng`     | yes      | Finite number from -180 to 180 |
+| `limit`   | no       | Integer 1–20; default 1        |
+
+Results are ordered by distance ascending. The service always returns the nearest known
+point(s); it does not apply a maximum-distance threshold.
+
+## Radius Search
+
+`GET /v1/locations/radius`
+
+| Parameter   | Required | Constraints                           |
+| ----------- | -------- | ------------------------------------- |
+| `lat`       | yes      | Finite number from -90 to 90          |
+| `lng`       | yes      | Finite number from -180 to 180        |
+| `radius_km` | yes      | Number greater than 0 and at most 500 |
+| `limit`     | no       | Integer 1–50; default 20              |
+| `cursor`    | no       | Opaque string, 1–1,024 characters     |
+
+Results are ordered by `distance_meters`, then `zip_code`. Responses include:
 
 ```json
 {
-    "status": 200,
-    "message": "success",
-    "data": [],
     "meta": {
         "limit": 20,
         "has_more": true,
@@ -130,68 +109,48 @@ Response `200`: array ordered by `distance_meters`, then `zip_code`; each row in
 }
 ```
 
-Pass `next_cursor` unchanged as the next request's `cursor`. The cursor is tied to the
-original `lat`, `lng`, and `radius_km`; reusing it with different parameters or sending
-a malformed cursor returns `400`. The final page has `has_more: false` and
-`next_cursor: null`. Across all pages, the client can retrieve every matching location.
-Zero matches → `200` with `data: []` and no next cursor.
+Pass `next_cursor` unchanged to retrieve the next page. It is tied to the original
+coordinates and radius; malformed or mismatched cursors return `400`. The final page has
+`has_more: false` and `next_cursor: null`.
 
-### Error shape (all endpoints)
+## Health
+
+`GET /v1/health` returns `200` when PostgreSQL is reachable and `503` when it is degraded.
+It is not rate-limited.
+
+## Errors and Rate Limiting
+
+Validation errors use this shape:
 
 ```json
 {
     "status": 400,
     "code": "BadRequestError",
     "message": "Validation failed",
-    "details": [{ "field": "lat", "error": "Number must be >= -90" }]
+    "details": [{ "field": "lat", "error": "Invalid value" }]
 }
 ```
 
-`500` responses never leak stack traces or internal messages in production.
+- Invalid inputs return `400`.
+- Unknown routes return `404` with `code: "NotFoundError"`.
+- Exceeded location quota returns `429` with `code: "RateLimitExceeded"`.
+- Unexpected failures return `500`; production responses do not expose internal details.
 
-With the provided configuration, all `/v1/locations` endpoints share one per-IP quota and
-return `429` with `code: "RateLimitExceeded"` when it is exhausted. `/v1/health` is not
-rate-limited. `.env.example` enables 60 requests per minute locally; production requires
-the same two variables to be configured explicitly.
+The provided configuration applies one in-memory per-IP quota of 60 requests per minute
+across `/v1/locations`. Production requires both rate-limit variables explicitly.
 
-## Non-Functional Requirements (acceptance criteria)
+## Non-Functional Guarantees
 
-- **Performance**: `search` (autocomplete-shaped) must be index-backed (GIN/pg_trgm), not
-  a sequential scan — verified via `EXPLAIN ANALYZE` during Stage 4.
-- **Scalability**: API is stateless (horizontally scalable); DB connection pool is the
-  documented bottleneck under load. Caching is documented as a next step, not built now.
-- **Observability**: every request logged (method, path, status, duration, request-id);
-  request-id echoed in response headers after safe-character/128-character validation;
-  `/health` reports DB connectivity.
-- **Error handling**: 400 (validation) vs 404 (single-resource not found, if any) vs 500
-  (internal) are always distinguishable, both by status code and by `code` field.
-- **Rate limiting**: one per-IP limiter for location endpoints, with standard
-  headers and a JSON `429` response; no distributed store is required for this assessment.
-- **Testing**: critical-path coverage for the 3 endpoints + ingestion idempotency.
-  Decided (see ARCHITECTURE.md): Vitest + Supertest integration tests against the real
-  ingested Postgres, not mocks — remaining endpoints follow the same approach.
+- ZIP prefix, city trigram, reverse KNN, and radius queries use the intended indexes.
+- The API is stateless; PostgreSQL and its bounded connection pool are the main shared
+  capacity constraint.
+- Business requests and failures emit structured logs with status, duration, query, and
+  validated request ID. Successful health probes are intentionally silent.
+- Critical endpoint and ingestion paths are tested with Vitest and Supertest against real
+  PostGIS. CI runs migration, ingestion, lint, typecheck, build, and the full suite.
 
 ## Data Source
 
-GeoNames `US.zip` (`download.geonames.org/export/zip/US.zip`), CC BY 4.0, no signup.
-41,489 rows, 2 duplicate ZIPs (military bases), verified by direct download this session.
-Converted to `data/us_zip_codes.csv` (`zip_code,city,state_code,state_name,county,latitude,longitude`),
-committed to the repo so setup works cold with no network dependency at ingest time.
-
-## Locked Decisions
-
-_(rationale for each lives in `ARCHITECTURE.md` — this list is reference only)_
-
-- Stack (constraint from the assessment): Node.js + TypeScript
-- Framework: Express 5
-- Database: PostgreSQL + PostGIS
-- Query layer: Kysely (no ORM)
-- Data model: single denormalized `zip_codes` table
-- Data source: GeoNames `US.zip`
-
-## Definition of Done
-
-- All 3 endpoints working against the real ingested dataset, verified via curl.
-- `README.md` lets a new engineer go from `git clone` to a working local API cold.
-- `ARCHITECTURE.md` documents every decision above with its trade-off and rejected alternatives.
-- Ingestion is demonstrably idempotent (running it twice produces zero net changes on the second run).
+The committed CSV contains 41,488 GeoNames records. Source URL, download date,
+transformation, record count, and license are maintained in
+[DATA_LICENSE.md](DATA_LICENSE.md).

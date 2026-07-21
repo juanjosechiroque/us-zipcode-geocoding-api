@@ -10,6 +10,21 @@ import { requestIdMiddleware } from "./middleware/requestIdMiddleware.js";
 import { CORS_ALLOWED_ORIGINS, NODE_ENV, TRUST_PROXY_HOPS } from "./config.js";
 import logger from "./utils/logger.js";
 
+type RequestLogLevel = "silent" | "info" | "warn" | "error";
+
+export function requestLogLevel(
+    req: { originalUrl?: string; url?: string },
+    res: { statusCode: number },
+    error?: Error
+): RequestLogLevel {
+    const path = (req.originalUrl ?? req.url)?.split("?", 1)[0];
+
+    if (!error && res.statusCode < 400 && path === "/v1/health") return "silent";
+    if (error || res.statusCode >= 500) return "error";
+    if (res.statusCode >= 400) return "warn";
+    return "info";
+}
+
 const app = express();
 
 app.set("trust proxy", TRUST_PROXY_HOPS);
@@ -22,6 +37,7 @@ if (NODE_ENV !== "test") {
         pinoHttp({
             logger,
             genReqId: (req: Request) => req.id,
+            customLogLevel: requestLogLevel,
             customSuccessMessage: () => "request completed",
             customErrorMessage: () => "request failed",
             serializers: {

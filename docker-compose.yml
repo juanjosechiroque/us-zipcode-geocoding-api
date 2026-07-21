@@ -11,11 +11,56 @@ services:
         volumes:
             - postgres-data:/var/lib/postgresql/data
         healthcheck:
-            test: ["CMD-SHELL", "pg_isready -U postgres -d zipcodes"]
+            test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U postgres -d zipcodes"]
             interval: 10s
             timeout: 5s
             retries: 5
             start_period: 10s
+
+    db-setup:
+        image: zipcodes-api:local
+        environment: &app-environment
+            NODE_ENV: production
+            DATABASE_URL: postgres://postgres:postgres@postgres:5432/zipcodes
+            RATE_LIMIT_WINDOW_MINUTES: ${RATE_LIMIT_WINDOW_MINUTES:-1}
+            RATE_LIMIT_MAX: ${RATE_LIMIT_MAX:-60}
+            TRUST_PROXY_HOPS: 0
+            LOG_LEVEL: ${LOG_LEVEL:-info}
+        depends_on:
+            postgres:
+                condition: service_healthy
+        command:
+            - sh
+            - -c
+            - node dist/scripts/migrate.js && node dist/scripts/ingest.js
+        restart: "no"
+
+    api:
+        image: zipcodes-api:local
+        build:
+            context: .
+            target: runtime
+        init: true
+        restart: unless-stopped
+        environment:
+            <<: *app-environment
+            PORT: 3000
+            CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:3000}
+        depends_on:
+            db-setup:
+                condition: service_completed_successfully
+        ports:
+            - "${PORT:-3000}:3000"
+        healthcheck:
+            test:
+                - CMD
+                - node
+                - -e
+                - fetch('http://127.0.0.1:3000/v1/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))
+            interval: 10s
+            timeout: 5s
+            retries: 5
+            start_period: 5s
 
 volumes:
     postgres-data:
