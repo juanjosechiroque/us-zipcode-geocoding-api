@@ -62,6 +62,11 @@ Behavior (not a street-address parser — see ARCHITECTURE.md for why):
 - otherwise → fuzzy match against `city`, scoped by state if the last comma-separated
   segment of `q` looks like a 2-letter state code (e.g. `"Beverly Hills, CA"` or
   `"123 Main St, Beverly Hills, CA"` both resolve to city `"Beverly Hills"` / state `CA`).
+- One- and two-character city queries use prefix matching only. Fuzzy/trigram matching
+  starts at three characters. Numeric ZIP prefixes remain valid from one digit.
+- City results rank exact matches first, literal prefixes second, and other trigram
+  matches third. Similarity descending, city, state code, and ZIP provide deterministic
+  ordering inside those tiers.
 
 Response `200`:
 

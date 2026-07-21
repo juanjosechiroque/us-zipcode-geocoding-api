@@ -129,8 +129,6 @@ data/                  # committed dataset
 - No street-level address parsing (dataset is ZIP/city/state-level).
 - Reverse lookup finds the nearest ZIP _centroid_, not the ZIP whose real boundary
   contains the point (the dataset has no boundary polygons).
-- Ranking on `search` is trigram similarity only — an exact match elsewhere can
-  outrank a more relevant one.
 
 Full list with rationale: [ARCHITECTURE.md](ARCHITECTURE.md#known-limitations).
 

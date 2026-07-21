@@ -77,12 +77,39 @@ export async function findByCity(
     stateCode: string | null,
     limit: number
 ): Promise<LocationDto[]> {
+    if (query.length < 3) {
+        let shortQueryBuilder = db
+            .selectFrom("zip_codes")
+            .select(SELECT_COLUMNS)
+            .where(sql<boolean>`city ILIKE ${query + "%"}`)
+            .orderBy(sql<number>`CASE WHEN lower(city) = lower(${query}) THEN 0 ELSE 1 END`, "asc")
+            .orderBy("city", "asc")
+            .orderBy("state_code", "asc")
+            .orderBy("zip_code", "asc")
+            .limit(limit);
+
+        if (stateCode) {
+            shortQueryBuilder = shortQueryBuilder.where("state_code", "=", stateCode);
+        }
+
+        return shortQueryBuilder.execute();
+    }
+
+    const relevance = sql<number>`
+        CASE
+            WHEN lower(city) = lower(${query}) THEN 0
+            WHEN city ILIKE ${query + "%"} THEN 1
+            ELSE 2
+        END
+    `;
     let builder = db
         .selectFrom("zip_codes")
         .select(SELECT_COLUMNS)
         .where(sql<boolean>`(city ILIKE ${query + "%"} OR city % ${query})`)
+        .orderBy(relevance, "asc")
         .orderBy(sql`similarity(city, ${query})`, "desc")
         .orderBy("city", "asc")
+        .orderBy("state_code", "asc")
         .orderBy("zip_code", "asc")
         .limit(limit);
 

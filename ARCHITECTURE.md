@@ -98,6 +98,13 @@ the first 20 details, then fails the run as one unit.
 `GET /v1/locations/search?q=&limit=` — contract in [SPEC.md](./SPEC.md). Branches on
 the shape of `q`: digits-only routes to a ZIP-prefix match, anything else to a city
 match (fuzzy + prefix), optionally scoped by state. All paths return the same shape.
+City relevance is intentionally small and explicit: exact match, then literal prefix,
+then trigram match; similarity and `(city, state_code, zip_code)` provide stable
+tie-breakers. PostgreSQL already supplies the required matching and index support, so a
+separate search engine would add operational cost without a demonstrated need.
+For one- and two-character city queries, only literal prefix matching is used and
+results sort by city/state/ZIP; trigram matching and similarity start at three characters,
+where they become useful. Numeric ZIP prefixes still work from one digit.
 
 **Not a street-address parser.** The prompt asks for "partial or full address," but the
 dataset has no street data. A full address resolves via whatever 5-digit ZIP is
@@ -128,9 +135,9 @@ bounded to 20 by default and 50 at most.
 
 ### Bugs found by testing, not by reading the code
 
-- **Non-deterministic order.** Searching `"York"` returns 14 exact ties with no
+- **Non-deterministic order.** Searching `"York"` returns many equal-score ties with no
   secondary sort key — order wasn't stable across runs. Fixed with explicit
-  tie-breakers (`similarity DESC, city ASC, zip_code ASC`).
+  relevance and tie-breakers (`exact/prefix/fuzzy`, similarity, city, state, ZIP).
 - **Wrong-city false positive.** `"Springfield, Illinois"` was falling back to
   searching for a city literally named `"Illinois"`, and confidently returning
   `"Illinois City"`. Fixed by falling back to the _first_ comma segment instead of the
@@ -138,15 +145,24 @@ bounded to 20 by default and 50 at most.
 - **Short queries returned nothing.** `similarity("Beverly", "Be") = 0.22`, below
   `pg_trgm`'s 0.3 threshold — so `q="Be"` excluded `"Beverly"` entirely, and `q="B"`
   (3,086 matching cities) returned zero. Trigram similarity needs more text than the
-  first keystroke gives it. Fixed by matching on `city ILIKE q||'%' OR city % q` —
-  prefix covers early typing, similarity still covers typos. Still uses the same GIN
-  index (confirmed with `EXPLAIN ANALYZE`, no new index needed).
+  first keystroke gives it. Fixed by using prefix-only search for one or two characters,
+  then `city ILIKE q||'%' OR city % q` from three characters onward. Prefix covers early
+  typing, similarity still covers typos. Both use the same GIN index (confirmed with
+  `EXPLAIN ANALYZE`, no new index needed).
+- **Similarity alone ranked the wrong intent.** A short fuzzy match could outrank an
+  exact city or a longer autocomplete prefix. Fixed by placing exact and prefix matches
+  into explicit tiers before applying trigram similarity within each tier.
 
 ## Non-Functional Notes
 
 - **Indexes verified, not assumed.** `EXPLAIN ANALYZE` before and after: ZIP prefix
   search went `Seq Scan` (29ms) → `Index Scan` (3.9ms) once a `text_pattern_ops` index
   was added (this DB's `en_US.utf8` collation can't use a plain btree for `LIKE`).
+- **Short city queries avoid premature fuzzy work.** `q=B` now performs one bitmap scan
+  on `zip_codes_city_trgm_idx`, followed by a 25kB top-N sort over 3,086 prefix matches;
+  removing the redundant trigram-similarity branch reduced the observed local execution
+  from ~52ms to ~30ms. `q=Be` completed in ~7ms. These Docker/emulation timings are
+  directional, while the plan shape is the durable result.
 - **The GiST index for reverse/radius is already verified, ahead of building those
   endpoints.** Ran real KNN and `ST_DWithin` queries by hand — both use
   `zip_codes_location_gist_idx` (`Index Scan` / `Bitmap Index Scan`), never a seq scan.
@@ -217,9 +233,6 @@ rows, hard deletes, repeat-run idempotency, and rollback when deletion fails.
 - Cursor pages are stateless and do not hold a database snapshot across HTTP requests.
   An atomic dataset refresh between pages can change later results; refreshes are rare,
   and the trade-off avoids keeping transactions and connections open for clients.
-- Ranking is trigram similarity only — exact matches in one state can outrank a more
-  relevant result elsewhere, and a short query can rank a long prefix match below an
-  unrelated short name. A weighted/boosted ranking would fix both; out of scope here.
 - Full US state names aren't recognized in `"City, State"` input, only 2-letter codes.
 - Connection pool size is hardcoded, not env-configurable.
 - **Reverse lookup finds the nearest ZIP _centroid_, not the ZIP whose real (irregular)
@@ -238,7 +251,6 @@ rows, hard deletes, repeat-run idempotency, and rollback when deletion fails.
 ## Next Steps
 
 - State-name-to-code mapping for forward search.
-- Prefix-aware ranking so short queries don't bury long, relevant matches.
 - `Dockerfile` + `api` service in `docker-compose.yml` for one-command full-stack spin-up.
 - Make the connection pool size configurable; configure rate limiting at deployment.
 - Normalize empty-string `state_code`/`state_name` to `null` for military/diplomatic ZIPs.

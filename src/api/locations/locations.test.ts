@@ -42,13 +42,38 @@ describe("GET /v1/locations/search", () => {
     });
 
     it("fuzzy-matches a city name", async () => {
-        const response = await api.get(`${V1}/locations/search?q=Beverly&limit=5`);
+        const response = await api.get(`${V1}/locations/search?q=Beverli&limit=5`);
 
         expect(response.status).toBe(200);
         expect(response.body.data.length).toBeGreaterThan(0);
         for (const row of response.body.data) {
             expect(row.city.toLowerCase()).toContain("beverly");
         }
+    });
+
+    it.each(["B", "Be"])("uses prefix-only matching for the short city query %s", async (query) => {
+        const response = await api.get(`${V1}/locations/search?q=${query}&limit=10`);
+
+        expect(response.status).toBe(200);
+        expect(response.body.data).toHaveLength(10);
+        for (const row of response.body.data) {
+            expect(row.city.toLowerCase().startsWith(query.toLowerCase())).toBe(true);
+        }
+    });
+
+    it("ranks exact city matches before prefix and fuzzy matches", async () => {
+        const response = await api.get(`${V1}/locations/search?q=York&limit=10`);
+
+        expect(response.status).toBe(200);
+        expect(response.body.data.slice(0, 2)).toEqual([
+            expect.objectContaining({ city: "York", state_code: "AL" }),
+            expect.objectContaining({ city: "York", state_code: "ME" }),
+        ]);
+        expect(
+            response.body.data
+                .slice(2)
+                .every((row: { city: string }) => row.city.toLowerCase().startsWith("york"))
+        ).toBe(true);
     });
 
     it("scopes a city match by state when q looks like 'City, ST'", async () => {
