@@ -61,6 +61,15 @@ describe("GET /v1/locations/search", () => {
         }
     });
 
+    it.each(["%", "_", "\\"])("rejects the LIKE metacharacter %s", async (query) => {
+        const response = await api.get(
+            `${V1}/locations/search?q=${encodeURIComponent(query)}&limit=10`
+        );
+
+        expect(response.status).toBe(400);
+        expect(response.body).toMatchObject({ status: 400, code: "BadRequestError" });
+    });
+
     it("ranks exact city matches before prefix and fuzzy matches", async () => {
         const response = await api.get(`${V1}/locations/search?q=York&limit=10`);
 

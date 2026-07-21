@@ -7,8 +7,8 @@ being built, see [SPEC.md](./SPEC.md) — this doc covers _why_, and what was re
 
 `index.ts` boots the server and owns process lifecycle (listen, graceful shutdown).
 `src/app.ts` wires the middleware stack: `helmet` → request-id → logging → `cors` →
-JSON body → router → 404 → error handler. The locations router adds optional rate
-limiting before its endpoints. Every request carries an `x-request-id`, echoed in the
+JSON body → router → 404 → error handler. The locations router adds the configured rate
+limit before its endpoints. Every request carries an `x-request-id`, echoed in the
 response header and in every log line for that request.
 
 Errors flow through one path: handlers `throw` an `AppError` with a `statusCode`, and
@@ -28,30 +28,19 @@ addresses, ZIP boundary polygons, or Census ZIP Code Tabulation Areas (ZCTAs). T
   this coordinate”;
 - radius search returns postal-code points inside the requested geodesic distance.
 
-## Decisions Log
+## Decision Summary
 
-**Express 5 + TypeScript, not Fastify.** Reused the hygiene of a personal starter repo
-(Zod env, pino logging, centralized errors) instead of building request plumbing from
-scratch. Fastify has a throughput edge, but this stays closer to a pattern already
-proven to work.
-
-**One denormalized `zip_codes` table, not `zip → city → state`.** The prompt calls the
-dataset "relational" but hints the obvious answer isn't right. Checked: GeoNames has
-41,489 rows, only 2 duplicate ZIPs. It's a flat entity — normalizing would add a join
-to every read for zero integrity benefit.
-
-**PostgreSQL + PostGIS, not MongoDB or Elasticsearch.** Needs geodesic radius/nearest
-queries (`geography` + GiST) _and_ fuzzy city search (`pg_trgm`) — Mongo covers the
-first but not the second without bolting on a search engine, which is exactly the
-"overbuilt" failure mode the prompt warns against.
-
-**Kysely, not an ORM.** Prisma has no native `geography` type — every spatial query
-would need a raw-SQL escape hatch anyway. Kysely keeps typed queries and raw `sql`
-fragments as equal citizens.
-
-**`location` is a generated column**, computed from lat/lng on every write. The
-ingestion script only ever touches lat/lng — there's no second code path that could
-let them drift out of sync.
+| Decision                                                          | Why                                                                                                      | Accepted trade-off                                                                                             |
+| ----------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| Express 5 + TypeScript                                            | Familiar, maintainable request plumbing with a mature middleware ecosystem.                              | Fastify could provide higher framework throughput, but framework overhead is not the measured bottleneck here. |
+| PostgreSQL + PostGIS + `pg_trgm`                                  | One database supports geodesic lookup, radius filtering, ZIP prefixes, and fuzzy city search.            | Requires Postgres extensions and spatial SQL knowledge.                                                        |
+| One denormalized `zip_codes` table                                | A ZIP record is the read model; normalization would add joins without useful integrity for this dataset. | Repeated city/state text is accepted in a small reference dataset.                                             |
+| Kysely instead of a full ORM                                      | Keeps ordinary queries typed while allowing first-class PostGIS SQL.                                     | Spatial expressions are manually written and need real-database tests.                                         |
+| Generated `location` geography column                             | Latitude, longitude, and the indexed spatial point cannot drift apart.                                   | PostgreSQL owns part of the data model rather than application code.                                           |
+| Complete-snapshot ingestion in one transaction                    | Repeat runs are idempotent and readers never see a partial refresh.                                      | A valid but incomplete source can delete legitimate rows; production refreshes need a completeness policy.     |
+| Radius capped at 500 km; pages default to 20 and allow at most 50 | Bounds database work and response size while cursors expose every match inside the accepted radius.      | Clients cannot request a continent-scale radius in one query and must follow cursors for large result sets.    |
+| Reverse lookup always returns the nearest point                   | Simple, deterministic contract; `distance_meters` lets clients judge usefulness.                         | Remote coordinates can receive a technically correct but irrelevant result.                                    |
+| One in-memory per-IP rate limit                                   | Appropriate and easy to run for a single-instance assessment.                                            | Multiple replicas require a gateway or shared store for a global quota.                                        |
 
 ## Data Ingestion
 
@@ -174,33 +163,45 @@ bounded to 20 by default and 50 at most.
 - **Load-tested, not just single-request.** 100 and 300 concurrent requests against the
   real dataset: 100% success, p50 ~170-185ms, no errors. The bounded connection pool
   (`max: 10`) queues rather than fails — that's the documented bottleneck under heavier load.
-- **Rate limiting is implemented and tested, but off by default.** One per-IP policy
+- **Rate limiting is implemented, tested, and enabled by the provided configuration.** One per-IP policy
   covers every `/v1/locations` endpoint; `/health` is outside that router and never
-  consumes location quota. The suggested starting point is 60 requests per minute.
-  Enabling it requires the two paired variables in `.env.example`; a custom handler
-  preserves the API's JSON error contract for `429` responses.
+  consumes location quota. The starting point is 60 requests per minute.
+  Production startup requires the two paired variables to be injected explicitly.
+  A custom handler preserves the API's JSON error contract for `429` responses.
+- **Proxy trust is explicit.** `TRUST_PROXY_HOPS` defaults to `0`; deployments set it
+  only when their known proxy topology overwrites `X-Forwarded-*`. This prevents clients
+  connected directly from choosing the IP used by the rate limiter.
+- **Search input remains data, not SQL or a LIKE pattern.** Kysely parameterizes all
+  values, `%`, `_`, and `\` are rejected at the API boundary, and the repository still
+  escapes them defensively. This prevents metacharacter-only input from forcing an
+  unindexable full-table scan.
+- **Request IDs are bounded before reflection and logging.** Client-provided IDs must use
+  a safe character set and contain at most 128 characters; invalid values are replaced
+  with a server-generated UUID.
 - **Query params are structured in logs** (`req.query`), not just embedded in the URL string.
 
-### Production policies to decide before deployment
+### Open Production Questions
 
-- **Remote reverse results:** the current API always returns the nearest known point,
-  even when it is far away. Product policy should choose between a hard maximum distance,
-  returning a `match_quality`/distance for the consumer to assess, or requiring callers
-  to provide their own maximum. A caller-provided `max_distance_km` is the most flexible;
-  a server-side safety ceiling prevents obviously misleading ocean results.
-- **Cancelled requests:** baseline protection is a PostgreSQL `statement_timeout` so
-  abandoned work is bounded. Stronger options are propagating request cancellation to
-  the database driver or routing expensive work through a separately limited pool. The
-  installed Kysely/`pg` query contract does not expose an `AbortSignal`, so racing the
-  promise would abandon only the HTTP response while the database keeps working. Real
-  cancellation would need to retain the query connection's PostgreSQL backend PID and
-  call `pg_cancel_backend` from a separate control connection, or add driver-level abort
-  support. The recommended production combination is a per-query timeout first, then
-  verified database cancellation when the HTTP connection closes.
-- **Distributed rate limits:** the current in-memory counter is appropriate for this
-  single-instance assessment. Multiple API replicas should enforce the same policy in a
-  shared gateway or store; adding Redis here without that deployment need would be
-  premature.
+These do not block the assessment, but they must be answered before a real launch:
+
+- **What are the traffic model and SLOs?** The repository records local load-test results,
+  but no product latency target, availability target, burst profile, or capacity margin was
+  provided. Those numbers should drive pool size and rate-limit calibration.
+- **Should remote reverse matches have a confidence policy?** This implementation always
+  returns the nearest point and its distance. Product must decide whether clients own that
+  interpretation or whether the API adds `max_distance_km` or a match-quality field.
+- **What is the database query budget after HTTP cancellation?** Requests do not yet cancel
+  active PostgreSQL work. Start with `statement_timeout`; add verified driver/database
+  cancellation on connection close only if load data shows that it is needed.
+- **What is the deployment topology?** One instance can use the current in-memory limiter.
+  Multiple replicas need a shared gateway/store, an agreed proxy hop count, and a total
+  database connection budget.
+- **Who owns dataset refreshes?** Define cadence, minimum expected row count/checksum,
+  alerting, retention, and rollback. The source URL, download date, record count, and
+  license are already recorded in `DATA_LICENSE.md`.
+- **Who are the external consumers?** Authentication, an OpenAPI document, compatibility
+  guarantees, and deprecation policy depend on whether this is public, partner-facing, or
+  internal.
 
 ## Testing
 
@@ -243,14 +244,14 @@ rows, hard deletes, repeat-run idempotency, and rollback when deletion fails.
   TIGER/Line ZCTA shapefiles) to fix — a different, larger dataset than GeoNames.
 - **509 of 41,488 rows (~1.2%) are military/diplomatic ZIPs (APO/FPO/DPO)** with empty
   `state_code`/`state_name` — GeoNames fills these with `""`, not `null`, unlike
-  `county` which is already nullable. Left as-is: they're real, useful ZIPs (removing
-  them would make reverse lookup give worse answers near overseas military
-  installations), but normalizing `""` → `null` for consistency is a cheap follow-up
-  (see Next Steps).
+  `county` which is nullable. This source representation is preserved deliberately:
+  deriving AA/AE/AP from the city label would invent data not supplied in those fields,
+  while changing them to `null` would widen the database and API contract without
+  improving lookup behavior. Consumers should interpret an empty state as unavailable.
 
 ## Next Steps
 
-- State-name-to-code mapping for forward search.
-- `Dockerfile` + `api` service in `docker-compose.yml` for one-command full-stack spin-up.
-- Make the connection pool size configurable; configure rate limiting at deployment.
-- Normalize empty-string `state_code`/`state_name` to `null` for military/diplomatic ZIPs.
+Before production, prioritize a database statement timeout, source-completeness guard,
+deployment/SLO decisions, and an OpenAPI contract for real consumers. Lower-priority
+improvements are state-name-to-code mapping, a configurable connection pool, and a
+`Dockerfile` + API service for one-command full-stack startup.

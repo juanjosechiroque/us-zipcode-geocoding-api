@@ -6,7 +6,12 @@ const queryNumber = z.preprocess(
 );
 
 export const searchQuerySchema = z.object({
-    q: z.string().trim().min(1).max(100),
+    q: z
+        .string()
+        .trim()
+        .min(1)
+        .max(100)
+        .regex(/^[^%_\\]*$/),
     limit: queryNumber.pipe(z.number().int().min(1).max(50)).default(10),
 });
 

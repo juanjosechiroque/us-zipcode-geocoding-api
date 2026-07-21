@@ -30,6 +30,10 @@ describe("location query validation", () => {
         ).toBe(20);
     });
 
+    it.each(["%", "_", "\\"])("rejects the LIKE metacharacter %s", (query) => {
+        expect(searchQuerySchema.safeParse({ q: query }).success).toBe(false);
+    });
+
     it("rejects a radius limit above 50", () => {
         expect(
             radiusQuerySchema.safeParse({

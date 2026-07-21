@@ -7,12 +7,12 @@ import router from "./router.js";
 import { errorGenericHandler } from "./middleware/errorMiddleware.js";
 import { notFound } from "./middleware/notFoundMiddleware.js";
 import { requestIdMiddleware } from "./middleware/requestIdMiddleware.js";
-import { CORS_ALLOWED_ORIGINS, NODE_ENV } from "./config.js";
+import { CORS_ALLOWED_ORIGINS, NODE_ENV, TRUST_PROXY_HOPS } from "./config.js";
 import logger from "./utils/logger.js";
 
 const app = express();
 
-app.set("trust proxy", 1);
+app.set("trust proxy", TRUST_PROXY_HOPS);
 
 app.use(helmet());
 app.use(requestIdMiddleware);

@@ -20,6 +20,10 @@ function geographyPoint(lat: number, lng: number) {
     return sql<string>`ST_SetSRID(ST_MakePoint(${lng}, ${lat}), 4326)::geography`;
 }
 
+function escapeLikePattern(value: string): string {
+    return value.replace(/[\\%_]/g, "\\$&");
+}
+
 export async function findNearest(lat: number, lng: number, limit: number): Promise<LocationDto[]> {
     const point = geographyPoint(lat, lng);
     return db
@@ -77,11 +81,13 @@ export async function findByCity(
     stateCode: string | null,
     limit: number
 ): Promise<LocationDto[]> {
+    const prefixPattern = `${escapeLikePattern(query)}%`;
+
     if (query.length < 3) {
         let shortQueryBuilder = db
             .selectFrom("zip_codes")
             .select(SELECT_COLUMNS)
-            .where(sql<boolean>`city ILIKE ${query + "%"}`)
+            .where(sql<boolean>`city ILIKE ${prefixPattern} ESCAPE E'\\\\'`)
             .orderBy(sql<number>`CASE WHEN lower(city) = lower(${query}) THEN 0 ELSE 1 END`, "asc")
             .orderBy("city", "asc")
             .orderBy("state_code", "asc")
@@ -98,14 +104,14 @@ export async function findByCity(
     const relevance = sql<number>`
         CASE
             WHEN lower(city) = lower(${query}) THEN 0
-            WHEN city ILIKE ${query + "%"} THEN 1
+            WHEN city ILIKE ${prefixPattern} ESCAPE E'\\\\' THEN 1
             ELSE 2
         END
     `;
     let builder = db
         .selectFrom("zip_codes")
         .select(SELECT_COLUMNS)
-        .where(sql<boolean>`(city ILIKE ${query + "%"} OR city % ${query})`)
+        .where(sql<boolean>`(city ILIKE ${prefixPattern} ESCAPE E'\\\\' OR city % ${query})`)
         .orderBy(relevance, "asc")
         .orderBy(sql`similarity(city, ${query})`, "desc")
         .orderBy("city", "asc")

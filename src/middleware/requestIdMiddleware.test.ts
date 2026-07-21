@@ -34,4 +34,28 @@ describe("requestIdMiddleware", () => {
         expect(res.setHeader).toHaveBeenCalledWith("x-request-id", "first-id");
         expect(next).toHaveBeenCalledOnce();
     });
+
+    it("accepts a safe request id at the maximum length", () => {
+        const requestId = "a".repeat(128);
+        const req = buildReq(requestId);
+        const res = buildRes();
+
+        requestIdMiddleware(req, res, vi.fn());
+
+        expect(req.id).toBe(requestId);
+    });
+
+    it.each(["a".repeat(129), "unsafe request id", "line\nbreak"])(
+        "replaces an unsafe request id with a UUID",
+        (requestId) => {
+            const req = buildReq(requestId);
+            const res = buildRes();
+
+            requestIdMiddleware(req, res, vi.fn());
+
+            expect(req.id).not.toBe(requestId);
+            expect(req.id).toMatch(/^[0-9a-f-]{36}$/);
+            expect(res.setHeader).toHaveBeenCalledWith("x-request-id", req.id);
+        }
+    );
 });

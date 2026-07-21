@@ -8,8 +8,9 @@ coordinates**, derived from GeoNames. It is not a street-address database, a map
 boundaries, or a Census ZCTA dataset. Reverse and radius operations compare coordinates
 with those representative points.
 
-Requirements and locked decisions: [SPEC.md](SPEC.md). This README stays thin on
-purpose — full reasoning and rejected alternatives live in [ARCHITECTURE.md](ARCHITECTURE.md).
+Implemented contract: [SPEC.md](SPEC.md). This README stays thin on purpose — decisions,
+trade-offs, limitations, and open production questions live in
+[ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## Key Decisions
 
@@ -22,7 +23,8 @@ purpose — full reasoning and rejected alternatives live in [ARCHITECTURE.md](A
 - **Kysely, not an ORM** — Prisma has no native `geography` type; every spatial query
   would need a raw-SQL escape hatch anyway.
 
-Why, and what was rejected for each: [ARCHITECTURE.md](ARCHITECTURE.md#decisions-log).
+Why, and the accepted cost of each choice:
+[ARCHITECTURE.md](ARCHITECTURE.md#decision-summary).
 
 ## Prerequisites
 
@@ -84,18 +86,23 @@ npm run format          # eslint --fix + prettier --write
 
 Tests run against a real Postgres, not mocks — see [why](ARCHITECTURE.md#testing).
 
-## Optional rate limiting
+## Deployment controls
 
-Location endpoints can share a per-IP limit by uncommenting both values in `.env`:
+Location endpoints share this per-IP limit in the provided configuration:
 
 ```env
 RATE_LIMIT_WINDOW_MINUTES=1
 RATE_LIMIT_MAX=60
 ```
 
-It is off by default for local evaluation. `/v1/health` is never rate-limited. The
-in-memory counter is suitable for one API instance; use a shared gateway or store when
-deploying multiple replicas.
+Copying `.env.example` to `.env` enables the limiter locally at 60 requests per minute.
+Production must inject both variables into the process environment; startup is rejected if
+either is absent. `/v1/health` is never rate-limited. The in-memory counter is suitable for
+one API instance; use a shared gateway or store when deploying multiple replicas.
+
+`TRUST_PROXY_HOPS` defaults to `0`, so client-supplied `X-Forwarded-*` headers are not
+trusted. Set it to `1` only when the API is always behind exactly one trusted proxy that
+overwrites those headers.
 
 ## Refreshing the dataset
 
@@ -134,5 +141,6 @@ Full list with rationale: [ARCHITECTURE.md](ARCHITECTURE.md#known-limitations).
 
 ## Next Steps
 
-A `Dockerfile` for one-command spin-up and a few smaller items. Full list:
-[ARCHITECTURE.md](ARCHITECTURE.md#next-steps).
+Production priorities and the questions still requiring product or infrastructure input:
+[ARCHITECTURE.md](ARCHITECTURE.md#open-production-questions). The smaller implementation
+follow-ups are listed in [Next Steps](ARCHITECTURE.md#next-steps).

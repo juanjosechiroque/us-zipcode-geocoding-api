@@ -1,6 +1,7 @@
 # SPEC: US ZIP Geocoding API
 
-**Status:** Locked — decisions below are closed, not open for re-discussion without an explicit new ask.
+**Status:** Assessment contract implemented. Product and deployment questions remain in
+[ARCHITECTURE.md](ARCHITECTURE.md#open-production-questions).
 **Version:** 1.0
 **Last updated:** 2026-07-20
 
@@ -26,7 +27,8 @@ production-mindedness — not feature volume.
 - Countries other than the US.
 - A UI/frontend.
 - Write endpoints (create/update/delete locations) — the dataset is read-only reference data.
-- Full OpenAPI spec (documented in README as a "next steps" item instead).
+- Full OpenAPI document (not required for the assessment; recommended before external
+  client integration).
 
 ## Data Ingestion Contract
 
@@ -49,10 +51,10 @@ production-mindedness — not feature volume.
 
 ### 1. Forward search — `GET /v1/locations/search`
 
-| Param   | Required | Type   | Constraints      |
-| ------- | -------- | ------ | ---------------- |
-| `q`     | yes      | string | 1–100 chars      |
-| `limit` | no       | int    | 1–50, default 10 |
+| Param   | Required | Type   | Constraints                       |
+| ------- | -------- | ------ | --------------------------------- |
+| `q`     | yes      | string | 1–100 chars; no `%`, `_`, or `\\` |
+| `limit` | no       | int    | 1–50, default 10                  |
 
 Behavior (not a street-address parser — see ARCHITECTURE.md for why):
 
@@ -147,9 +149,10 @@ Zero matches → `200` with `data: []` and no next cursor.
 
 `500` responses never leak stack traces or internal messages in production.
 
-When rate limiting is enabled, all `/v1/locations` endpoints share one per-IP quota and
+With the provided configuration, all `/v1/locations` endpoints share one per-IP quota and
 return `429` with `code: "RateLimitExceeded"` when it is exhausted. `/v1/health` is not
-rate-limited. The local default is off; `.env.example` suggests 60 requests per minute.
+rate-limited. `.env.example` enables 60 requests per minute locally; production requires
+the same two variables to be configured explicitly.
 
 ## Non-Functional Requirements (acceptance criteria)
 
@@ -158,10 +161,11 @@ rate-limited. The local default is off; `.env.example` suggests 60 requests per 
 - **Scalability**: API is stateless (horizontally scalable); DB connection pool is the
   documented bottleneck under load. Caching is documented as a next step, not built now.
 - **Observability**: every request logged (method, path, status, duration, request-id);
-  request-id echoed in response headers; `/health` reports DB connectivity.
+  request-id echoed in response headers after safe-character/128-character validation;
+  `/health` reports DB connectivity.
 - **Error handling**: 400 (validation) vs 404 (single-resource not found, if any) vs 500
   (internal) are always distinguishable, both by status code and by `code` field.
-- **Rate limiting**: one optional per-IP limiter for location endpoints, with standard
+- **Rate limiting**: one per-IP limiter for location endpoints, with standard
   headers and a JSON `429` response; no distributed store is required for this assessment.
 - **Testing**: critical-path coverage for the 3 endpoints + ingestion idempotency.
   Decided (see ARCHITECTURE.md): Vitest + Supertest integration tests against the real
