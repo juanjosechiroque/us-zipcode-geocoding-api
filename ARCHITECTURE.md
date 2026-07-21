@@ -65,12 +65,23 @@ every batch commits or a failure rolls back the complete run. For this ~41k-row 
 the bounded transaction is an acceptable trade-off. A much larger or continuously
 served dataset should use a staging table plus a short transactional swap/merge instead.
 
+The complete file is parsed and validated before `BEGIN`; malformed source data cannot
+publish even one batch. Headers must be exactly `zip_code`, `city`, `state_code`,
+`state_name`, `county`, `latitude`, and `longitude` (order is flexible). ZIPs must remain
+5-digit strings; city, state name, and county are capped at 150 characters; coordinates
+must be finite and inside their geographic ranges; and state code/name must be jointly
+present. Empty state fields are accepted only for the source's APO/FPO/DPO records. Blank
+counties normalize to `NULL`. Validation scans every row, logs the total issue count and
+the first 20 details, then fails the run as one unit.
+
 - **Idempotent**, verified: run #1 inserts 41,488 rows; run #2 reports 0/0/41,488 unchanged.
-- **Source changes** re-ingest safely — the conflict target is the natural key (`zip_code`).
-- **Duplicates are a real failure mode**, not just messy data: a single batch statement
-  errors if two input rows share a conflict key. GeoNames has 2. Handled twice — the
-  CSV is pre-deduped, and the script _also_ collapses by `zip_code` in memory before
-  batching, so a dirtier future source degrades gracefully instead of crashing mid-run.
+- **Source changes** re-ingest safely for inserts and updates — the conflict target is
+  the natural key (`zip_code`). Rows removed from a future source are deliberately not
+  deleted yet; snapshot synchronization needs an explicit retention policy.
+- **Duplicates are classified before persistence.** Rows that are equivalent after the
+  documented normalization collapse and are counted. Two different records claiming the
+  same ZIP fail validation because silently choosing first or last would hide an ambiguous
+  source change.
 - **Dataset**: GeoNames `US.zip`, CC BY 4.0, committed to the repo so setup works cold.
 - **Concurrent runs, tested for real**: launched two `db:ingest` processes at once
   against an empty table — Postgres serialized the conflicting upserts safely, zero
@@ -179,6 +190,15 @@ above were caught this way: a test failed against real data where manual curl te
 had already "passed." Trade-off: no fully isolated unit-test path for the repository
 layer, by design.
 
+Ingestion idempotency is also tested against real PostgreSQL in an isolated schema. The
+test verifies the first insert, a second unchanged run, a single-row update, final row
+counts, and multi-batch behavior without mutating the API test dataset.
+
+Source validation has a separate unit suite for header drift, numeric/range failures,
+leading-zero ZIPs, military/diplomatic exceptions, and identical versus conflicting
+duplicates. A transaction-boundary test additionally proves invalid CSV never issues
+`BEGIN`.
+
 ## Known Limitations
 
 - No street-level address parsing (dataset is ZIP/city/state-level only).
@@ -207,7 +227,8 @@ layer, by design.
 
 ## Next Steps
 
-- Automated idempotency test for ingestion (today it's verified by hand).
+- Define snapshot deletion semantics for ZIPs removed from a refreshed source, then
+  implement them through staging-table reconciliation.
 - State-name-to-code mapping for forward search.
 - Prefix-aware ranking so short queries don't bury long, relevant matches.
 - `Dockerfile` + `api` service in `docker-compose.yml` for one-command full-stack spin-up.

@@ -28,6 +28,22 @@ production-mindedness — not feature volume.
 - Write endpoints (create/update/delete locations) — the dataset is read-only reference data.
 - Full OpenAPI spec (documented in README as a "next steps" item instead).
 
+## Data Ingestion Contract
+
+- Input is a CSV with exactly these headers, in any order: `zip_code`, `city`,
+  `state_code`, `state_name`, `county`, `latitude`, `longitude`.
+- Validate the whole source before opening the write transaction. On failure, report the
+  total number of issues and retain at most the first 20 structured details.
+- ZIP is exactly five digits; city is required; coordinates are finite and within
+  latitude `[-90, 90]` and longitude `[-180, 180]`. City, state name, and county have a
+  maximum length of 150 characters; a present state code is exactly two letters.
+- State code and name are jointly present. Both may be empty only for APO/FPO/DPO rows.
+  Blank county is stored as `NULL`.
+- Identical duplicate ZIP rows collapse and are counted. Conflicting records for one ZIP
+  reject the complete source.
+- Publish all batches in one transaction. Re-running the same valid source makes no data
+  changes. Deletion of records absent from a later source is not part of version 1.
+
 ## Functional Requirements
 
 ### 1. Forward search — `GET /v1/locations/search`

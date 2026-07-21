@@ -1,39 +1,20 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { parse } from "csv-parse/sync";
 import { Pool, type PoolClient } from "pg";
 import { DATABASE_URL } from "../src/config.js";
 import logger from "../src/utils/logger.js";
+import {
+    DatasetValidationError,
+    parseAndValidateCsv,
+    type ValidatedZipRow,
+} from "./ingest-validation.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_DATA_PATH = path.join(__dirname, "..", "data", "us_zip_codes.csv");
 const BATCH_SIZE = 500;
 
 const INGEST_LOCK_ID = 947_215_806;
-
-export interface ZipRow {
-    zip_code: string;
-    city: string;
-    state_code: string;
-    state_name: string;
-    county: string;
-    latitude: string;
-    longitude: string;
-}
-
-function loadRows(dataPath: string): ZipRow[] {
-    const raw = readFileSync(dataPath, "utf8");
-    return parse(raw, { columns: true, skip_empty_lines: true, trim: true }) as ZipRow[];
-}
-
-function dedupeByZip(rows: ZipRow[]): { unique: ZipRow[]; duplicates: number } {
-    const byZip = new Map<string, ZipRow>();
-    for (const row of rows) {
-        byZip.set(row.zip_code, row);
-    }
-    return { unique: [...byZip.values()], duplicates: rows.length - byZip.size };
-}
 
 function chunk<T>(items: T[], size: number): T[][] {
     const chunks: T[][] = [];
@@ -43,7 +24,7 @@ function chunk<T>(items: T[], size: number): T[][] {
     return chunks;
 }
 
-async function upsertBatch(client: PoolClient, batch: ZipRow[]) {
+async function upsertBatch(client: PoolClient, batch: ValidatedZipRow[]) {
     const columns = [
         "zip_code",
         "city",
@@ -62,9 +43,9 @@ async function upsertBatch(client: PoolClient, batch: ZipRow[]) {
                 row.city,
                 row.state_code,
                 row.state_name,
-                row.county || null,
-                Number(row.latitude),
-                Number(row.longitude)
+                row.county,
+                row.latitude,
+                row.longitude
             );
             return `(${columns.map((_, colIndex) => `$${base + colIndex + 1}`).join(", ")})`;
         })
@@ -98,7 +79,7 @@ async function upsertBatch(client: PoolClient, batch: ZipRow[]) {
     return { inserted, updated, unchanged };
 }
 
-export async function upsertBatchesAtomically(client: PoolClient, batches: ZipRow[][]) {
+export async function upsertBatchesAtomically(client: PoolClient, batches: ValidatedZipRow[][]) {
     const totals = { inserted: 0, updated: 0, unchanged: 0 };
 
     await client.query("BEGIN");
@@ -117,6 +98,30 @@ export async function upsertBatchesAtomically(client: PoolClient, batches: ZipRo
         logger.error({ err: error }, "Ingestion transaction rolled back");
         throw error;
     }
+}
+
+export async function ingestRows(
+    client: PoolClient,
+    rows: ValidatedZipRow[],
+    batchSize = BATCH_SIZE
+) {
+    const batches = chunk(rows, batchSize);
+    const totals = await upsertBatchesAtomically(client, batches);
+
+    return {
+        ...totals,
+        total: rows.length,
+    };
+}
+
+export async function ingestCsv(client: PoolClient, csv: string, batchSize = BATCH_SIZE) {
+    const dataset = parseAndValidateCsv(csv);
+    const totals = await ingestRows(client, dataset.rows, batchSize);
+    return {
+        ...totals,
+        rawRowCount: dataset.rawRowCount,
+        identicalDuplicates: dataset.identicalDuplicates,
+    };
 }
 
 async function ingest() {
@@ -138,18 +143,12 @@ async function ingest() {
             return;
         }
 
-        const rawRows = loadRows(dataPath);
-        const { unique: rows, duplicates } = dedupeByZip(rawRows);
+        const csv = readFileSync(dataPath, "utf8");
+        logger.info({ dataPath }, "Starting ingestion validation");
 
-        logger.info(
-            { dataPath, rawRowCount: rawRows.length, uniqueRowCount: rows.length, duplicates },
-            "Starting ingestion"
-        );
+        const result = await ingestCsv(lockHolder, csv);
 
-        const batches = chunk(rows, BATCH_SIZE);
-        const totals = await upsertBatchesAtomically(lockHolder, batches);
-
-        logger.info({ ...totals, total: rows.length }, "Ingestion complete");
+        logger.info(result, "Ingestion complete");
     } finally {
         await lockHolder.query("SELECT pg_advisory_unlock($1)", [INGEST_LOCK_ID]);
         lockHolder.release();
@@ -162,7 +161,18 @@ const isMainModule =
 
 if (isMainModule) {
     ingest().catch((err: unknown) => {
-        logger.error({ err }, "Ingestion failed");
+        if (err instanceof DatasetValidationError) {
+            logger.error(
+                {
+                    code: err.code,
+                    totalIssues: err.totalIssues,
+                    issues: err.issues,
+                },
+                "Ingestion validation failed"
+            );
+        } else {
+            logger.error({ err }, "Ingestion failed");
+        }
         process.exit(1);
     });
 }

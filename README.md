@@ -88,9 +88,11 @@ Tests run against a real Postgres, not mocks — see [why](ARCHITECTURE.md#testi
 
 `data/us_zip_codes.csv` (GeoNames `US.zip`, CC BY 4.0) is committed so setup works
 offline. `npm run db:ingest` is idempotent, safe to re-run anytime — including against
-a refreshed copy of the source file. All batches commit as one transaction, so a failed
-run does not publish a partial refresh. Details: [ARCHITECTURE.md](ARCHITECTURE.md#data-ingestion)
-and [DATA_LICENSE.md](DATA_LICENSE.md).
+a refreshed copy of the source file. Before opening the write transaction, the command
+validates the complete CSV, reports at most the first 20 row-level issues plus the total,
+and rejects conflicting rows for the same ZIP. All batches then commit as one transaction,
+so a failed run does not publish a partial refresh. Details:
+[ARCHITECTURE.md](ARCHITECTURE.md#data-ingestion) and [DATA_LICENSE.md](DATA_LICENSE.md).
 
 ## Project structure
 
@@ -120,5 +122,5 @@ Full list with rationale: [ARCHITECTURE.md](ARCHITECTURE.md#known-limitations).
 
 ## Next Steps
 
-A `Dockerfile` for one-command spin-up, an automated ingestion idempotency test, and a
-few smaller items. Full list: [ARCHITECTURE.md](ARCHITECTURE.md#next-steps).
+A `Dockerfile` for one-command spin-up, explicit deletion semantics for source refreshes,
+and a few smaller items. Full list: [ARCHITECTURE.md](ARCHITECTURE.md#next-steps).
