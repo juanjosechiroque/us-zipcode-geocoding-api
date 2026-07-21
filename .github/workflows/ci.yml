@@ -19,7 +19,7 @@ jobs:
                 ports:
                     - 5432:5432
                 options: >-
-                    --health-cmd "pg_isready -U postgres -d zipcodes_test"
+                    --health-cmd "pg_isready -h 127.0.0.1 -U postgres -d zipcodes_test"
                     --health-interval 5s
                     --health-timeout 5s
                     --health-retries 10
@@ -35,6 +35,7 @@ jobs:
                   node-version-file: .nvmrc
                   cache: npm
             - run: npm ci
+            - run: docker build --target runtime .
             - run: npm run db:migrate
             - run: npm run db:ingest
             - run: npm run typecheck
